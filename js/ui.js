@@ -201,7 +201,10 @@ class UIManager {
 
         this.opacity?.addEventListener('input', (e) => {
             this.opacityValue.textContent = e.target.value + '%';
-            this.updateBackground();
+            // 只有在毛玻璃开启时才更新背景透明度
+            if (this.glassEffect?.checked) {
+                this.updateBackground();
+            }
         });
 
         // 毛玻璃效果开关
@@ -442,21 +445,36 @@ class UIManager {
 
     // 更新背景效果
     updateBackground() {
-        // opacity 滑块范围 0-100
-        // 滑块值越大 → UI 越透明 → 背景越透出
-        // 滑块值越小 → UI 越不透明 → 背景被遮挡
-        const rawOpacity = this.opacity?.value ?? 70;
+        const brightness = this.brightness?.value ?? 100;  // 亮度 0-200
+        const blur = this.blur?.value ?? 0;               // 模糊度 0-30
+        const cardOpacity = this.opacity?.value ?? 70;   // 透明度 0-100，作用于卡片背景
 
-        // 限制 UI 透明度范围：最低 0.25（25%），最高 1.0（100%）
-        // 这样 UI 永远不会完全消失
-        const minOpacity = 0.25;
-        const maxOpacity = 1.0;
-        const uiOpacity = Math.min(maxOpacity, Math.max(minOpacity, rawOpacity / 100));
-
-        const appContainer = document.querySelector('.app-container');
-        if (appContainer) {
-            appContainer.style.opacity = uiOpacity;
+        // 亮度：控制背景图片的 brightness filter
+        if (this.bgImage) {
+            this.bgImage.style.filter = `brightness(${brightness}%) blur(${blur}px)`;
         }
+
+        // 透明度：控制 song-card 和 lyric-panel 的背景透明度
+        // 只有在毛玻璃开启时才应用透明度设置，关闭时保持淡色背景
+        const isGlassEnabled = this.glassEffect?.checked ?? true;
+
+        if (isGlassEnabled) {
+            // 滑块值越大 → 卡片越透明 → 背景越透出
+            const minCardOpacity = 0.15;  // 最低15%，保证文字可读
+            const maxCardOpacity = 0.95;  // 最高95%
+            const normalizedCardOpacity = minCardOpacity + (cardOpacity / 100) * (maxCardOpacity - minCardOpacity);
+
+            const songCard = document.querySelector('.song-card');
+            const lyricPanel = document.querySelector('.lyric-panel');
+
+            if (songCard) {
+                songCard.style.background = `rgba(255, 255, 255, ${normalizedCardOpacity})`;
+            }
+            if (lyricPanel) {
+                lyricPanel.style.background = `rgba(255, 255, 255, ${normalizedCardOpacity})`;
+            }
+        }
+        // 如果毛玻璃关闭，背景已经由 toggleGlassEffect 设置为淡色，不需要修改
 
         // 保存效果设置
         this.saveBgEffectSettings();
@@ -476,10 +494,32 @@ class UIManager {
 
     // 切换毛玻璃效果
     toggleGlassEffect(enabled) {
+        const songCard = document.querySelector('.song-card');
+        const lyricPanel = document.querySelector('.lyric-panel');
+
         if (enabled) {
             document.body.classList.remove('no-blur');
+            // 恢复毛玻璃时的背景
+            const cardOpacity = this.opacity?.value ?? 70;
+            const minCardOpacity = 0.15;
+            const maxCardOpacity = 0.95;
+            const normalizedCardOpacity = minCardOpacity + (cardOpacity / 100) * (maxCardOpacity - minCardOpacity);
+
+            if (songCard) {
+                songCard.style.background = `rgba(255, 255, 255, ${normalizedCardOpacity})`;
+            }
+            if (lyricPanel) {
+                lyricPanel.style.background = `rgba(255, 255, 255, ${normalizedCardOpacity})`;
+            }
         } else {
             document.body.classList.add('no-blur');
+            // 关闭毛玻璃时，背景变得很淡，让背景透出来
+            if (songCard) {
+                songCard.style.background = 'rgba(255, 255, 255, 0.1)';
+            }
+            if (lyricPanel) {
+                lyricPanel.style.background = 'rgba(255, 255, 255, 0.1)';
+            }
         }
     }
 
