@@ -533,6 +533,46 @@ body {
     align-items: center;
 }
 
+.user-avatar {
+    width: 42px;
+    height: 42px;
+    border-radius: var(--radius-full);
+    border: 3px solid var(--sakura-pink);
+    object-fit: cover;
+    cursor: pointer;
+    transition: all var(--duration-fast) var(--ease-bounce);
+}
+
+.user-avatar:hover {
+    transform: scale(1.1);
+    box-shadow: var(--shadow-glow);
+}
+
+.user-nickname {
+    font-size: 14px;
+    color: var(--text-primary);
+}
+
+.user-logged {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.account-logged {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+}
+
+.account-logged img {
+    width: 50px;
+    height: 50px;
+    border-radius: var(--radius-full);
+    border: 2px solid var(--sakura-pink);
+}
+
 .login-btn {
     padding: 8px 20px;
     background: linear-gradient(135deg, var(--sakura-pink), var(--candy-rose));
