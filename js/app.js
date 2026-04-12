@@ -288,7 +288,11 @@ class MusicApp {
 
         try {
             const result = await API.getLikeList(this.user.id);
-            if (result.ids && result.ids.includes(songId)) {
+            // 网易云API返回格式是 result.data.ids
+            const likeIds = result.data?.ids || result.ids || [];
+            // 确保 songId 类型一致（转换为数字比较）
+            const songIdNum = Number(songId);
+            if (likeIds.includes(songIdNum)) {
                 this.ui.isLiked = true;
             } else {
                 this.ui.isLiked = false;
