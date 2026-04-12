@@ -2,7 +2,7 @@
 node_modules/
 
 # 本地配置和缓存
-config.json
+**/config.json
 *.local
 
 # 日志
