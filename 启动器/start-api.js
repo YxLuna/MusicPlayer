@@ -250,43 +250,55 @@ function createStatusServer(apiPort, playerPort) {
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>网易云音乐启动器</title>
+    <title>♪ CloudMusic Pro 启动器</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
-            font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif;
-            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            font-family: 'Noto Sans SC', 'Inter', 'Segoe UI', sans-serif;
+            background: linear-gradient(135deg, #FFF8F5 0%, #FFEEF2 50%, #FFF0F5 100%);
             min-height: 100vh;
             display: flex;
             align-items: center;
             justify-content: center;
-            color: #fff;
+            color: #4A3540;
         }
         .container {
-            background: rgba(255,255,255,0.1);
+            background: rgba(255,255,255,0.9);
             backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
             padding: 40px;
-            border-radius: 20px;
-            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 24px;
+            border: 2px solid rgba(255,183,197,0.4);
             text-align: center;
-            min-width: 450px;
+            min-width: 460px;
+            box-shadow: 0 8px 32px rgba(255,183,197,0.3);
         }
         h1 {
             font-size: 28px;
-            margin-bottom: 30px;
-            background: linear-gradient(135deg, #ff6b9d, #c44569);
+            margin-bottom: 8px;
+            background: linear-gradient(135deg, #FFB7C5, #E88BA0);
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        .subtitle {
+            font-size: 14px;
+            color: #E88BA0;
+            margin-bottom: 28px;
         }
         .status {
             display: flex;
             align-items: center;
             justify-content: center;
             gap: 10px;
-            margin-bottom: 30px;
-            padding: 15px;
-            background: rgba(255,255,255,0.05);
-            border-radius: 10px;
+            margin-bottom: 28px;
+            padding: 14px;
+            background: rgba(255,183,197,0.1);
+            border-radius: 12px;
+            border: 1px solid rgba(255,183,197,0.2);
         }
         .status-dot {
             width: 12px;
@@ -296,31 +308,40 @@ function createStatusServer(apiPort, playerPort) {
             animation: pulse 2s infinite;
         }
         @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.5; }
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.7; transform: scale(0.9); }
         }
         .services {
-            margin-bottom: 20px;
+            margin-bottom: 24px;
             text-align: left;
         }
         .service-item {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            padding: 12px 15px;
+            padding: 14px 18px;
             margin-bottom: 10px;
-            background: rgba(255,255,255,0.05);
-            border-radius: 10px;
-            border-left: 4px solid #ff6b9d;
+            background: rgba(255,240,245,0.6);
+            border-radius: 12px;
+            border-left: 4px solid #FFB7C5;
         }
-        .service-item .name { font-weight: 500; }
-        .service-item .port { color: #ff6b9d; font-family: monospace; }
+        .service-item .name { font-weight: 600; font-size: 15px; }
+        .service-item .port { color: #E88BA0; font-family: monospace; font-size: 14px; }
         .service-item a {
-            color: #ff6b9d;
+            color: #E88BA0;
             text-decoration: none;
             font-size: 14px;
+            font-weight: 500;
+            padding: 6px 14px;
+            border-radius: 20px;
+            background: rgba(255,183,197,0.15);
+            transition: all 0.2s;
         }
-        .service-item a:hover { text-decoration: underline; }
+        .service-item a:hover {
+            background: #FFB7C5;
+            color: white;
+            text-decoration: none;
+        }
         .btn {
             padding: 12px 30px;
             margin: 5px;
@@ -328,62 +349,67 @@ function createStatusServer(apiPort, playerPort) {
             border-radius: 25px;
             cursor: pointer;
             font-size: 14px;
+            font-weight: 600;
             transition: all 0.3s;
         }
         .btn-primary {
-            background: linear-gradient(135deg, #ff6b9d, #c44569);
+            background: linear-gradient(135deg, #FFB7C5, #E88BA0);
             color: white;
+            box-shadow: 0 4px 15px rgba(255,183,197,0.4);
         }
         .btn-primary:hover {
             transform: scale(1.05);
-            box-shadow: 0 5px 20px rgba(255,107,157,0.4);
+            box-shadow: 0 6px 20px rgba(255,183,197,0.5);
         }
         .btn-secondary {
-            background: rgba(255,255,255,0.1);
-            color: white;
-            border: 1px solid rgba(255,255,255,0.2);
+            background: rgba(255,183,197,0.15);
+            color: #E88BA0;
+            border: 1px solid rgba(255,183,197,0.3);
         }
-        .btn-secondary:hover { background: rgba(255,255,255,0.2); }
+        .btn-secondary:hover { background: rgba(255,183,197,0.25); }
         .form-group {
-            margin-bottom: 15px;
+            margin-bottom: 14px;
             text-align: left;
         }
         .form-group label {
             display: block;
-            margin-bottom: 8px;
-            color: #a0a0a0;
-            font-size: 14px;
+            margin-bottom: 6px;
+            color: #8a7080;
+            font-size: 13px;
+            font-weight: 500;
         }
         .form-group input {
             width: 100%;
-            padding: 12px 16px;
-            background: rgba(255,255,255,0.1);
-            border: 1px solid rgba(255,255,255,0.1);
+            padding: 10px 14px;
+            background: rgba(255,240,245,0.6);
+            border: 1px solid rgba(255,183,197,0.3);
             border-radius: 10px;
-            color: white;
-            font-size: 16px;
+            color: #4A3540;
+            font-size: 15px;
         }
         .form-group input:focus {
             outline: none;
-            border-color: #ff6b9d;
+            border-color: #FFB7C5;
+            background: rgba(255,255,255,0.8);
         }
-        .config-form { display: none; }
+        .config-form { display: none; margin-top: 20px; }
         .config-form.show { display: block; }
-        .msg { margin-top: 15px; padding: 10px; border-radius: 8px; display: none; }
-        .msg.success { background: rgba(76,175,80,0.2); color: #4caf50; }
-        .msg.error { background: rgba(244,67,54,0.2); color: #f44336; }
+        .msg { margin-top: 14px; padding: 10px; border-radius: 8px; display: none; font-size: 13px; }
+        .msg.success { background: rgba(76,175,80,0.15); color: #4caf50; }
+        .msg.error { background: rgba(244,67,54,0.15); color: #f44336; }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>♫ 网易云音乐启动器</h1>
+        <h1>♪ CloudMusic Pro</h1>
+        <p class="subtitle">二次元主题音乐播放器</p>
         <div class="status">
             <div class="status-dot"></div>
             <span>所有服务运行中</span>
         </div>
         <div class="services">
             <div class="service-item">
-                <span class="name">🎵 音乐播放器</span>
+                <span class="name">🎵 播放器</span>
                 <span class="port">:${playerPort}</span>
                 <a href="http://localhost:${playerPort}" target="_blank">打开</a>
             </div>
