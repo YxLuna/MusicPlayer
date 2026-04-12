@@ -10,6 +10,12 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet">
 </head>
 <body>
+    <!-- 背景装饰层 -->
+    <div class="bg-layer"></div>
+
+    <!-- 樱花飘落容器 -->
+    <div class="sakura-container" id="sakuraContainer"></div>
+
     <!-- 背景层 -->
     <div class="background-layer" id="backgroundLayer">
         <div class="background-image" id="bgImage"></div>
@@ -338,5 +344,28 @@
     <script src="js/visualizer.js"></script>
     <script src="js/ui.js"></script>
     <script src="js/app.js"></script>
+
+    <!-- 樱花动画初始化 -->
+    <script>
+        // 创建樱花飘落效果
+        function createSakura() {
+            const container = document.getElementById('sakuraContainer');
+            if (!container) return;
+
+            const petalCount = 12;
+            for (let i = 0; i < petalCount; i++) {
+                const petal = document.createElement('div');
+                const size = ['sakura-petal--small', 'sakura-petal--medium', 'sakura-petal--large'][Math.floor(Math.random() * 3)];
+                petal.className = `sakura-petal ${size}`;
+                petal.style.left = `${Math.random() * 100}%`;
+                petal.style.animationDuration = `${10 + Math.random() * 10}s`;
+                petal.style.animationDelay = `${Math.random() * 10}s`;
+                petal.style.opacity = 0.5 + Math.random() * 0.4;
+                container.appendChild(petal);
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', createSakura);
+    </script>
 </body>
 </html>
