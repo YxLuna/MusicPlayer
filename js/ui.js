@@ -442,12 +442,20 @@ class UIManager {
 
     // 更新背景效果
     updateBackground() {
-        const opacity = this.opacity?.value || 100;
+        // opacity 滑块范围 0-100
+        // 滑块值越大 → UI 越透明 → 背景越透出
+        // 滑块值越小 → UI 越不透明 → 背景被遮挡
+        const rawOpacity = this.opacity?.value ?? 70;
 
-        // 设置 .app-container 的 opacity 来显示背景
+        // 限制 UI 透明度范围：最低 0.25（25%），最高 1.0（100%）
+        // 这样 UI 永远不会完全消失
+        const minOpacity = 0.25;
+        const maxOpacity = 1.0;
+        const uiOpacity = Math.min(maxOpacity, Math.max(minOpacity, rawOpacity / 100));
+
         const appContainer = document.querySelector('.app-container');
         if (appContainer) {
-            appContainer.style.opacity = opacity / 100;
+            appContainer.style.opacity = uiOpacity;
         }
 
         // 保存效果设置
