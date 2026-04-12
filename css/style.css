@@ -681,6 +681,7 @@ body {
     min-height: 0;
     overflow: hidden;
     animation: slide-in-right var(--duration-slow) var(--ease-out) 0.4s both;
+    transition: all var(--duration-normal);
 }
 
 /* ========== 歌曲信息卡片 ========== */
@@ -785,6 +786,7 @@ body {
     overflow: hidden;
     min-height: 350px;
     box-shadow: var(--shadow-soft);
+    transition: all var(--duration-normal);
 }
 
 .lyric-header {

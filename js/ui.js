@@ -442,14 +442,23 @@ class UIManager {
 
     // 更新背景效果
     updateBackground() {
-        if (!this.bgImage) return;
-
         const brightness = this.brightness?.value || 100;
         const blur = this.blur?.value || 0;
         const opacity = this.opacity?.value || 70;
 
-        this.bgImage.style.filter = `brightness(${brightness}%) blur(${blur}px)`;
-        this.bgImage.style.opacity = opacity / 100;
+        // 调整前景元素的透明度和模糊度（让用户能看到背景）
+        const foregroundSelectors = [
+            '.song-card',
+            '.lyric-panel',
+            '.display-right'
+        ];
+
+        foregroundSelectors.forEach(selector => {
+            document.querySelectorAll(selector).forEach(el => {
+                el.style.backdropFilter = `blur(${blur}px)`;
+                el.style.backgroundColor = `rgba(255, 255, 255, ${opacity / 100})`;
+            });
+        });
 
         // 保存效果设置
         this.saveBgEffectSettings();
