@@ -471,13 +471,13 @@ class UIManager {
     toggleGlassEffect(enabled) {
         // 需要禁用毛玻璃的元素选择器
         const glassSelectors = [
-            'header',
+            '.top-bar',
             '.song-card',
             '.lyric-panel',
-            '.track-list-container',
             '.right-panel',
             '.player-bar',
-            '.modal'
+            '.modal',
+            '.panel-content'
         ];
 
         glassSelectors.forEach(selector => {

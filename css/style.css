@@ -291,6 +291,16 @@ body {
     opacity: 0.03;
 }
 
+/* ========== 背景层 ========== */
+.background-layer {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: -1;
+}
+
 /* ========== 背景图片层 ========== */
 .background-image {
     position: absolute;
@@ -313,6 +323,7 @@ body {
     width: 100%;
     height: 100%;
     background: linear-gradient(135deg, rgba(13, 13, 13, 0.9) 0%, rgba(26, 26, 46, 0.85) 50%, rgba(15, 52, 96, 0.9) 100%);
+    pointer-events: none;
 }
 
 /* ========== 樱花容器 ========== */
@@ -1214,6 +1225,21 @@ input:checked + .slider {
 
 input:checked + .slider:before {
     transform: translateX(18px);
+}
+
+/* 禁用毛玻璃效果 */
+.no-glass {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+}
+
+body.no-blur .top-bar,
+body.no-blur .player-bar,
+body.no-blur .right-panel,
+body.no-blur .song-card,
+body.no-blur .lyric-panel {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
 }
 
 /* 账号信息 */
