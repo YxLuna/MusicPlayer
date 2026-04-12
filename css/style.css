@@ -367,6 +367,16 @@ body {
    Components CSS - 樱花主题组件
    ================================================ */
 
+/* ========== 主应用容器 ========== */
+.app-container {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    position: relative;
+    z-index: 10;
+    transition: opacity 0.3s ease;
+}
+
 /* ========== 顶部导航栏 ========== */
 .top-bar {
     position: fixed;

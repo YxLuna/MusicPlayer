@@ -442,23 +442,13 @@ class UIManager {
 
     // 更新背景效果
     updateBackground() {
-        const brightness = this.brightness?.value || 100;
-        const blur = this.blur?.value || 0;
-        const opacity = this.opacity?.value || 70;
+        const opacity = this.opacity?.value || 100;
 
-        // 调整前景元素的透明度和模糊度（让用户能看到背景）
-        const foregroundSelectors = [
-            '.song-card',
-            '.lyric-panel',
-            '.display-right'
-        ];
-
-        foregroundSelectors.forEach(selector => {
-            document.querySelectorAll(selector).forEach(el => {
-                el.style.backdropFilter = `blur(${blur}px)`;
-                el.style.backgroundColor = `rgba(255, 255, 255, ${opacity / 100})`;
-            });
-        });
+        // 设置 .app-container 的 opacity 来显示背景
+        const appContainer = document.querySelector('.app-container');
+        if (appContainer) {
+            appContainer.style.opacity = opacity / 100;
+        }
 
         // 保存效果设置
         this.saveBgEffectSettings();
@@ -478,26 +468,11 @@ class UIManager {
 
     // 切换毛玻璃效果
     toggleGlassEffect(enabled) {
-        // 需要禁用毛玻璃的元素选择器
-        const glassSelectors = [
-            '.top-bar',
-            '.song-card',
-            '.lyric-panel',
-            '.right-panel',
-            '.player-bar',
-            '.modal',
-            '.panel-content'
-        ];
-
-        glassSelectors.forEach(selector => {
-            document.querySelectorAll(selector).forEach(el => {
-                if (enabled) {
-                    el.classList.remove('no-glass');
-                } else {
-                    el.classList.add('no-glass');
-                }
-            });
-        });
+        if (enabled) {
+            document.body.classList.remove('no-blur');
+        } else {
+            document.body.classList.add('no-blur');
+        }
     }
 
     // 处理背景上传
