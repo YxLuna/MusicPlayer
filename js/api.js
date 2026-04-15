@@ -143,6 +143,10 @@ const API = {
         return this.request('/simi/song', { id });
     },
 
+    async getArtistTopSongs(id) {
+        return this.request('/artist/top/song', { id });
+    },
+
     // 搜索相关
     async search(keywords, type = 1, limit = 30, offset = 0) {
         return this.request('/search', { keywords, type, limit, offset });

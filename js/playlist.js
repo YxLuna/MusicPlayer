@@ -137,12 +137,32 @@ class PlaylistManager {
         try {
             const result = await API.getSongDetail(songIds);
             if (result.songs) {
-                return result.songs.map(song => this.formatSong(song));
+                return result.songs.map(song => ({
+                    ...this.formatSong(song),
+                    type: 'song'
+                }));
             }
         } catch (error) {
             console.error('获取歌曲详情失败:', error);
             return [];
         }
+    }
+
+    // 获取歌手热门歌曲
+    async getArtistTopSongs(artistId) {
+        try {
+            const result = await API.getArtistTopSongs(artistId);
+            if (result.songs) {
+                return result.songs.map(song => ({
+                    ...this.formatSong(song),
+                    type: 'song'
+                }));
+            }
+        } catch (error) {
+            console.error('获取歌手热门歌曲失败:', error);
+        }
+
+        return [];
     }
 
     // 搜索
@@ -168,7 +188,10 @@ class PlaylistManager {
                     try {
                         const detailResult = await API.getSongDetail(songIds.slice(0, 10));
                         if (detailResult.songs) {
-                            return detailResult.songs.map(song => this.formatSong(song));
+                            return detailResult.songs.map(song => ({
+                                ...this.formatSong(song),
+                                type: 'song'
+                            }));
                         }
                     } catch (e) {
                         console.error('获取歌曲详情失败', e);
@@ -184,15 +207,30 @@ class PlaylistManager {
                         al: song.album || song.al || null,
                         dt: song.duration || song.dt || 0
                     };
-                    return this.formatSong(normalized);
+                    return {
+                        ...this.formatSong(normalized),
+                        type: 'song'
+                    };
                 }) || [];
                 return songs;
             case 10: // 专辑
                 return searchResult?.albums || [];
             case 100: // 歌手
-                return searchResult?.artists || [];
+                return (searchResult?.artists || []).map(artist => ({
+                    id: artist.id,
+                    name: artist.name,
+                    cover: artist.picUrl || artist.img1v1Url || '',
+                    subtitle: artist.alias?.join(' / ') || `${artist.musicSize || 0} 首歌曲`,
+                    type: 'artist'
+                }));
             case 1000: // 歌单
-                return searchResult?.playlists || [];
+                return (searchResult?.playlists || []).map(playlist => ({
+                    id: playlist.id,
+                    name: playlist.name,
+                    cover: playlist.coverImgUrl || '',
+                    subtitle: `${playlist.creator?.nickname || '未知创建者'} · ${playlist.trackCount || 0} 首`,
+                    type: 'playlist'
+                }));
             default:
                 return [];
         }

@@ -27,6 +27,7 @@ class UIManager {
         this.searchInput = document.getElementById('searchInput');
         this.searchBtn = document.getElementById('searchBtn');
         this.searchResults = document.getElementById('searchResults');
+        this.searchTypeBtns = document.querySelectorAll('.search-type-btn');
 
         // 歌单
         this.playlistList = document.getElementById('playlistList');
@@ -139,7 +140,7 @@ class UIManager {
 
     bindEvents() {
         // 登录弹窗
-        this.loginBtn?.addEventListener('click', () => this.showLoginModal());
+        this.loginBtn?.addEventListener('click', () => this.onLoginRequest?.());
         this.closeLoginModal?.addEventListener('click', () => this.hideLoginModal());
         this.loginModal?.addEventListener('click', (e) => {
             if (e.target === this.loginModal) this.hideLoginModal();
@@ -235,11 +236,19 @@ class UIManager {
         this.searchInput?.addEventListener('keypress', (e) => {
             if (e.key === 'Enter') this.onSearch?.();
         });
+        this.searchInput?.addEventListener('input', (e) => {
+            this.onSearchInput?.(e.target.value);
+        });
+        this.searchTypeBtns.forEach(btn => {
+            btn.addEventListener('click', () => {
+                this.onSearchTypeChange?.(parseInt(btn.dataset.type, 10));
+            });
+        });
 
         // 点击外部关闭搜索结果
         document.addEventListener('click', (e) => {
             if (!e.target.closest('.search-box')) {
-                this.searchResults.classList.remove('active');
+                this.hideSearchResults();
             }
         });
     }
@@ -325,6 +334,12 @@ class UIManager {
         }
     }
 
+    // 批量更新音量UI
+    updateVolumeUI(volume) {
+        this.updateVolumeBar(volume);
+        this.updateVolumeIcon(volume);
+    }
+
     // 更新播放状态图标
     updatePlayState(isPlaying) {
         if (!this.playIcon) return;
@@ -354,6 +369,34 @@ class UIManager {
         } else {
             this.loopModeBtn?.classList.remove('active');
         }
+    }
+
+    // 更新音质按钮状态
+    updateQualityButtons(quality) {
+        this.qualityBtns.forEach(btn => {
+            btn.classList.toggle('active', parseInt(btn.dataset.quality, 10) === quality);
+        });
+    }
+
+    // 更新搜索分类
+    setSearchType(type) {
+        this.searchTypeBtns.forEach(btn => {
+            btn.classList.toggle('active', parseInt(btn.dataset.type, 10) === type);
+        });
+
+        if (!this.searchInput) return;
+
+        const placeholders = {
+            1: '搜索单曲、歌词关键词...',
+            1000: '搜索歌单名称...',
+            100: '搜索歌手名称...'
+        };
+        this.searchInput.placeholder = placeholders[type] || '搜索歌曲、歌手、歌单...';
+    }
+
+    // 隐藏搜索结果
+    hideSearchResults() {
+        this.searchResults?.classList.remove('active');
     }
 
     // 更新音量图标
@@ -420,7 +463,7 @@ class UIManager {
         } else {
             // 未喜欢 - 显示空心
             if (path) {
-                path.setAttribute('d', 'M16.5 3c-1.74 0-3.41.81-4.5 2.09C10.91 3.81 9.24 3 7.5 3 4.42 3 2 5.42 2 8.5c0 3.78 3.4 6.86 8.55 8.55 11.54L12 21.35l1.45-1.32C18.6 15.36 22 12.28 22 8.5 22 5.42 19.58 3 16.5 3zm-4.4 15.55l-.1.1-.1-.1C7.14 14.24 4 11.39 4 8.5 4 6.5 5.5 5 7.5 5c1.54 0 3.04.99 3.57 2.36h1.87C13.46 5.99 14.96 5 16.5 5c2 0 3.5 1.5 3.5 3.5 0 2.89-3.14 5.74-7.9 10.05z');
+                path.setAttribute('d', 'M16.5 3c-1.74 0-3.41.81-4.5 2.09C10.91 3.81 9.24 3 7.5 3 4.42 3 2 5.42 2 8.5c0 3.78 3.4 6.86 8.55 11.54L12 21.35l1.45-1.32C18.6 15.36 22 12.28 22 8.5 22 5.42 19.58 3 16.5 3zm-4.4 15.55l-.1.1-.1-.1C7.14 14.24 4 11.39 4 8.5 4 6.5 5.5 5 7.5 5c1.54 0 3.04.99 3.57 2.36h1.87C13.46 5.99 14.96 5 16.5 5c2 0 3.5 1.5 3.5 3.5 0 2.89-3.14 5.74-7.9 10.05z');
                 path.setAttribute('fill', 'currentColor');
             }
             this.likeBtn.classList.remove('liked');
@@ -743,12 +786,12 @@ class UIManager {
     }
 
     // 渲染歌单列表（渲染到右侧侧边栏）
-    renderPlaylists(playlists) {
+    renderPlaylists(playlists, activePlaylistId = null) {
         if (!this.playlistList) return;
 
         // 使用右侧侧边栏的样式类名
         this.playlistList.innerHTML = playlists.map((playlist, index) => `
-            <div class="panel-playlist-item ${index === 0 ? 'active' : ''}" data-id="${playlist.id}">
+            <div class="panel-playlist-item ${(activePlaylistId ? playlist.id === activePlaylistId : index === 0) ? 'active' : ''}" data-id="${playlist.id}">
                 <img src="${playlist.cover || 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="36" height="36"%3E%3Crect fill="%231a1a2e" width="36" height="36"/%3E%3C/svg%3E'}" alt="${playlist.name}" class="panel-playlist-cover">
                 <div class="panel-playlist-info">
                     <div class="panel-playlist-name">${playlist.name}</div>
@@ -800,7 +843,7 @@ class UIManager {
         }
 
         this.lyricContent.innerHTML = lyrics.map((line, index) => `
-            <div class="lyric-line ${line.translated ? 'has-trans' : ''}" data-index="${index}" data-time="${line.time}">
+            <div class="lyric-line ${line.translated ? 'has-trans' : ''} ${line.selected ? 'selected' : ''}" data-index="${index}" data-time="${line.time}">
                 ${line.content || '♪'}
                 ${line.translated ? `<div class="lyric-translated">${line.translated}</div>` : ''}
             </div>
@@ -930,6 +973,7 @@ class UIManager {
     // 隐藏登录弹窗
     hideLoginModal() {
         this.loginModal?.classList.remove('active');
+        this.onLoginModalHide?.();
     }
 
     // 切换登录标签
@@ -989,7 +1033,7 @@ class UIManager {
         if (!user) {
             this.userInfo.innerHTML = '<button class="login-btn" id="loginBtn">登录</button>';
             this.accountInfo.innerHTML = '<p class="not-login">未登录</p>';
-            document.getElementById('loginBtn')?.addEventListener('click', () => this.showLoginModal());
+            document.getElementById('loginBtn')?.addEventListener('click', () => this.onLoginRequest?.());
             return;
         }
 
@@ -1014,9 +1058,40 @@ class UIManager {
     }
 
     // 搜索结果显示
-    showSearchResults(results) {
+    showSearchSuggestions(suggestions) {
+        if (!this.searchResults) return;
+
+        if (!suggestions || suggestions.length === 0) {
+            this.hideSearchResults();
+            return;
+        }
+
+        this.searchResults.innerHTML = `
+            <div class="search-section-title">搜索建议</div>
+            ${suggestions.slice(0, 8).map(keyword => `
+                <div class="search-result-item suggestion-item" data-keyword="${keyword}">
+                    <div class="search-result-icon">⌕</div>
+                    <div class="search-result-info">
+                        <div class="search-result-title">${keyword}</div>
+                    </div>
+                </div>
+            `).join('')}
+        `;
+
+        this.searchResults.classList.add('active');
+
+        this.searchResults.querySelectorAll('.suggestion-item').forEach(item => {
+            item.addEventListener('click', () => {
+                this.onSearchSuggestionClick?.(item.dataset.keyword);
+            });
+        });
+    }
+
+    showSearchResults(results, searchType = 1) {
+        if (!this.searchResults) return;
+
         if (!results || results.length === 0) {
-            this.searchResults.innerHTML = '<div class="search-result-item">未找到相关结果</div>';
+            this.searchResults.innerHTML = '<div class="search-empty">未找到相关结果</div>';
             this.searchResults.classList.add('active');
             return;
         }
@@ -1024,23 +1099,50 @@ class UIManager {
         // 默认封面SVG
         const defaultCover = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="48" height="48"%3E%3Crect fill="%231a1a2e" width="48" height="48"/%3E%3Ccircle cx="24" cy="24" r="12" fill="%23333" opacity="0.5"/%3E%3C/svg%3E';
 
-        this.searchResults.innerHTML = results.slice(0, 10).map(song => `
-            <div class="search-result-item" data-id="${song.id}">
-                <img src="${song.cover || defaultCover}" alt="${song.name}" class="result-cover" onerror="this.src='${defaultCover}'">
-                <div class="search-result-info">
-                    <div class="search-result-title">${song.name || '未知歌曲'}</div>
-                    <div class="search-result-artist">${song.artist || '未知艺术家'} · ${song.album || '未知专辑'}</div>
+        const titleMap = {
+            1: '单曲结果',
+            1000: '歌单结果',
+            100: '歌手结果'
+        };
+
+        const itemsHtml = results.slice(0, 10).map(item => {
+            const itemType = item.type || (searchType === 100 ? 'artist' : searchType === 1000 ? 'playlist' : 'song');
+            const meta = itemType === 'song'
+                ? `${item.artist || '未知艺术家'} · ${item.album || '未知专辑'}`
+                : (item.subtitle || '');
+            const duration = itemType === 'song' ? (item.durationStr || '--:--') : '';
+            const icon = itemType === 'artist' ? '♫' : itemType === 'playlist' ? '☰' : '';
+            const media = item.cover
+                ? `<img src="${item.cover}" alt="${item.name}" class="result-cover" onerror="this.src='${defaultCover}'">`
+                : `<div class="search-result-icon">${icon || '♪'}</div>`;
+
+            return `
+                <div class="search-result-item" data-id="${item.id}" data-type="${itemType}" data-name="${item.name || ''}">
+                    ${media}
+                    <div class="search-result-info">
+                        <div class="search-result-title">${item.name || '未命名结果'}</div>
+                        ${meta ? `<div class="search-result-artist">${meta}</div>` : ''}
+                    </div>
+                    ${duration ? `<span class="search-result-duration">${duration}</span>` : ''}
                 </div>
-                <span class="search-result-duration">${song.durationStr || '--:--'}</span>
-            </div>
-        `).join('');
+            `;
+        }).join('');
+
+        this.searchResults.innerHTML = `
+            <div class="search-section-title">${titleMap[searchType] || '搜索结果'}</div>
+            ${itemsHtml}
+        `;
 
         this.searchResults.classList.add('active');
 
         // 绑定点击事件
         this.searchResults.querySelectorAll('.search-result-item').forEach(item => {
             item.addEventListener('click', () => {
-                this.onSearchResultClick?.(parseInt(item.dataset.id));
+                this.onSearchResultClick?.({
+                    id: parseInt(item.dataset.id, 10),
+                    type: item.dataset.type,
+                    name: item.dataset.name
+                });
             });
         });
     }

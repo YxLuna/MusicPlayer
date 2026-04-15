@@ -10,6 +10,7 @@ class LyricParser {
         this.currentLine = 0;
         this.isEnabled = true;
         this.selectedLines = []; // 选中的歌词行
+        this.selectionAnchor = null;
         this.isSelecting = false;
     }
 
@@ -158,7 +159,8 @@ class LyricParser {
             timeStr: Player.formatTime(line.time),
             content: line.content || '♪',
             translated: line.translated,
-            romaji: line.romaji
+            romaji: line.romaji,
+            selected: this.selectedLines.includes(index)
         }));
     }
 
@@ -189,16 +191,18 @@ class LyricParser {
 
     // 选择歌词行（用于循环播放）
     selectLine(lineIndex, isMultiSelect = false) {
-        if (isMultiSelect) {
-            const index = this.selectedLines.indexOf(lineIndex);
-            if (index > -1) {
-                this.selectedLines.splice(index, 1);
-            } else {
-                this.selectedLines.push(lineIndex);
-                this.selectedLines.sort((a, b) => a - b);
-            }
-        } else {
+        if (!isMultiSelect || this.selectionAnchor === null) {
             this.selectedLines = [lineIndex];
+            this.selectionAnchor = lineIndex;
+            return;
+        }
+
+        const start = Math.min(this.selectionAnchor, lineIndex);
+        const end = Math.max(this.selectionAnchor, lineIndex);
+        this.selectedLines = [];
+
+        for (let i = start; i <= end; i++) {
+            this.selectedLines.push(i);
         }
     }
 
@@ -226,6 +230,7 @@ class LyricParser {
     // 清除选择
     clearSelection() {
         this.selectedLines = [];
+        this.selectionAnchor = null;
     }
 
     // 启用/禁用歌词

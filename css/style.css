@@ -486,9 +486,48 @@ body {
     color: var(--sakura-deep);
 }
 
+.search-types {
+    display: flex;
+    gap: 8px;
+    position: absolute;
+    top: calc(100% + 8px);
+    left: 0;
+    right: 0;
+    padding: 0 4px;
+    overflow-x: auto;
+    scrollbar-width: none;
+    z-index: 51;
+}
+
+.search-types::-webkit-scrollbar {
+    display: none;
+}
+
+.search-type-btn {
+    border: none;
+    background: rgba(255, 255, 255, 0.55);
+    color: var(--text-secondary);
+    border-radius: var(--radius-full);
+    padding: 6px 12px;
+    font-size: 12px;
+    cursor: pointer;
+    transition: all var(--duration-fast);
+}
+
+.search-type-btn:hover {
+    color: var(--sakura-deep);
+    background: rgba(255, 255, 255, 0.82);
+}
+
+.search-type-btn.active {
+    background: linear-gradient(135deg, var(--sakura-pink), var(--sakura-deep));
+    color: #fff;
+    box-shadow: 0 6px 16px rgba(232, 139, 160, 0.22);
+}
+
 .search-results {
     position: absolute;
-    top: 100%;
+    top: calc(100% + 42px);
     left: 0;
     right: 0;
     margin-top: 8px;
@@ -504,6 +543,14 @@ body {
 
 .search-results.active {
     display: block;
+}
+
+.search-section-title {
+    padding: 12px 16px 8px;
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--text-secondary);
+    letter-spacing: 0.04em;
 }
 
 .search-result-item {
@@ -526,11 +573,27 @@ body {
     object-fit: cover;
 }
 
+.search-result-icon {
+    width: 48px;
+    height: 48px;
+    border-radius: var(--radius-md);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    background: linear-gradient(135deg, rgba(255, 183, 197, 0.25), rgba(255, 171, 118, 0.18));
+    color: var(--sakura-deep);
+    font-size: 18px;
+    font-weight: 700;
+}
+
+.search-result-info,
 .result-info {
     flex: 1;
     min-width: 0;
 }
 
+.search-result-title,
 .result-title {
     font-size: 0.95rem;
     color: var(--text-primary);
@@ -539,13 +602,21 @@ body {
     text-overflow: ellipsis;
 }
 
+.search-result-artist,
 .result-artist {
     font-size: 0.8rem;
     color: var(--text-secondary);
 }
 
+.search-result-duration,
 .result-duration {
     font-size: 0.75rem;
+    color: var(--text-secondary);
+}
+
+.search-empty {
+    padding: 22px 16px;
+    text-align: center;
     color: var(--text-secondary);
 }
 
@@ -873,6 +944,12 @@ body {
 .lyric-line:hover {
     color: var(--text-primary);
     background: rgba(255, 183, 197, 0.1);
+}
+
+.lyric-line.selected {
+    color: var(--text-primary);
+    background: rgba(255, 183, 197, 0.16);
+    box-shadow: inset 0 0 0 1px rgba(255, 183, 197, 0.3);
 }
 
 .lyric-line.active {

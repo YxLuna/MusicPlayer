@@ -16,6 +16,13 @@ class MusicApp {
         this.user = null;
         this.qrCheckTimer = null;
         this.isLoopPlaying = false;
+        this.storageKey = 'musicPlayerState';
+        this.persistedState = this.loadPersistedState();
+        this.pendingRestoreState = null;
+        this.hasRestoredSession = false;
+        this.lastPersistedTime = 0;
+        this.searchType = this.persistedState.searchType || 1;
+        this.searchSuggestTimer = null;
 
         this.init();
     }
@@ -39,11 +46,16 @@ class MusicApp {
         // 绑定事件回调
         this.bindCallbacks();
 
+        // 恢复持久化偏好
+        this.applyPersistedPreferences();
+        this.ui.setSearchType(this.searchType);
+
         // 初始化默认歌单
         await this.loadDefaultPlaylists();
 
-        // 加载第一个歌单
-        if (this.playlistManager.playlists.length > 0) {
+        // 恢复上次播放歌单，否则加载第一个歌单
+        const restored = await this.tryRestorePlaybackSession();
+        if (!restored && this.playlistManager.playlists.length > 0) {
             await this.selectPlaylist(this.playlistManager.playlists[0].id);
         }
 
@@ -69,15 +81,129 @@ class MusicApp {
         this.ui.onTrackSelect = (index) => this.playTrack(index);
         this.ui.onLyricClick = (index, isMulti) => this.handleLyricClick(index, isMulti);
         this.ui.onSearch = () => this.handleSearch();
-        this.ui.onSearchResultClick = (id) => this.playSearchResult(id);
+        this.ui.onSearchInput = (keywords) => this.handleSearchInput(keywords);
+        this.ui.onSearchTypeChange = (type) => this.handleSearchTypeChange(type);
+        this.ui.onSearchSuggestionClick = (keyword) => this.handleSearchSuggestionClick(keyword);
+        this.ui.onSearchResultClick = (item) => this.handleSearchResultClick(item);
         this.ui.onLogout = () => this.logout();
+        this.ui.onLoginRequest = () => this.requestLogin();
+        this.ui.onLoginModalHide = () => this.stopQrLoginCheck();
+    }
+
+    loadPersistedState() {
+        try {
+            const saved = localStorage.getItem(this.storageKey);
+            return saved ? JSON.parse(saved) : {};
+        } catch (error) {
+            console.error('读取播放状态失败:', error);
+            return {};
+        }
+    }
+
+    persistPlaybackState(extra = {}) {
+        try {
+            const currentPlaylistId = Number.isFinite(Number(this.playlistManager.currentPlaylist?.id))
+                ? Number(this.playlistManager.currentPlaylist.id)
+                : null;
+            const hasExplicitPlaylistId = Object.prototype.hasOwnProperty.call(extra, 'playlistId');
+            const playlistId = currentPlaylistId !== null
+                ? currentPlaylistId
+                : (hasExplicitPlaylistId ? extra.playlistId : (this.persistedState.playlistId ?? null));
+            const currentIndex = playlistId !== null
+                ? this.player.currentIndex
+                : (this.persistedState.currentIndex ?? null);
+            const currentSongId = playlistId !== null
+                ? (this.player.currentSong?.id || null)
+                : (this.persistedState.currentSongId ?? null);
+            const currentTime = playlistId !== null
+                ? Math.floor(this.player.getCurrentTime() || 0)
+                : (this.persistedState.currentTime ?? 0);
+
+            const state = {
+                ...this.persistedState,
+                volume: this.player.volume,
+                loopMode: this.player.loopMode,
+                quality: this.player.quality,
+                playbackRate: this.player.playbackRate,
+                playlistId,
+                currentIndex,
+                currentSongId,
+                currentTime,
+                searchType: this.searchType,
+                ...extra
+            };
+
+            localStorage.setItem(this.storageKey, JSON.stringify(state));
+            this.persistedState = state;
+        } catch (error) {
+            console.error('保存播放状态失败:', error);
+        }
+    }
+
+    applyPersistedPreferences() {
+        const volume = Number(this.persistedState.volume);
+        const quality = Number(this.persistedState.quality);
+        const playbackRate = Number(this.persistedState.playbackRate);
+        const loopMode = this.persistedState.loopMode;
+
+        if (!Number.isNaN(volume)) {
+            this.player.setVolume(volume);
+            this.ui.updateVolumeUI(volume);
+        } else {
+            this.ui.updateVolumeUI(this.player.volume);
+        }
+
+        if (!Number.isNaN(quality) && [128, 192, 320].includes(quality)) {
+            this.player.setQuality(quality);
+        }
+        this.ui.updateQualityButtons(this.player.quality);
+
+        if (!Number.isNaN(playbackRate) && playbackRate > 0) {
+            this.player.setPlaybackRate(playbackRate);
+        }
+
+        if (['sequence', 'single', 'random'].includes(loopMode)) {
+            this.player.loopMode = loopMode;
+        }
+        this.ui.updateLoopMode(this.player.loopMode);
+    }
+
+    async tryRestorePlaybackSession() {
+        if (this.hasRestoredSession) return true;
+
+        const playlistId = Number(this.persistedState.playlistId);
+        if (Number.isNaN(playlistId)) return false;
+        const savedIndex = Number(this.persistedState.currentIndex);
+        const savedTime = Math.max(0, Number(this.persistedState.currentTime) || 0);
+
+        await this.selectPlaylist(playlistId);
+
+        const currentPlaylistId = Number(this.playlistManager.currentPlaylist?.id);
+        if (!this.player.playlist.length || currentPlaylistId !== playlistId) {
+            return false;
+        }
+
+        const safeIndex = Number.isNaN(savedIndex)
+            ? 0
+            : Math.max(0, Math.min(savedIndex, this.player.playlist.length - 1));
+
+        this.pendingRestoreState = {
+            songId: this.player.playlist[safeIndex]?.id,
+            time: savedTime
+        };
+
+        await this.playTrack(safeIndex, { autoPlay: false });
+        this.ui.updatePlayState(false);
+        this.hasRestoredSession = true;
+        this.ui.showToast('已恢复上次播放状态', 'success');
+        return true;
     }
 
     // 加载默认歌单
     async loadDefaultPlaylists() {
         try {
             await this.playlistManager.initDefaultPlaylists();
-            this.ui.renderPlaylists(this.playlistManager.playlists);
+            this.ui.renderPlaylists(this.playlistManager.playlists, this.playlistManager.currentPlaylist?.id);
         } catch (error) {
             console.error('加载默认歌单失败:', error);
             // 使用备用歌单
@@ -85,7 +211,7 @@ class MusicApp {
                 { id: 3778678, name: '热歌榜', cover: '', count: 0 },
                 { id: 3779629, name: '新歌榜', cover: '', count: 0 }
             ];
-            this.ui.renderPlaylists(this.playlistManager.playlists);
+            this.ui.renderPlaylists(this.playlistManager.playlists, this.playlistManager.currentPlaylist?.id);
         }
     }
 
@@ -98,13 +224,9 @@ class MusicApp {
             if (playlist) {
                 // 设置播放列表
                 this.player.setPlaylist(playlist.tracks, 0);
-                this.ui.renderPlaylists(this.playlistManager.playlists);
+                this.ui.renderPlaylists(this.playlistManager.playlists, playlistId);
                 this.ui.renderTrackList(playlist.tracks);
-
-                // 高亮当前歌单
-                document.querySelectorAll('.playlist-item').forEach(item => {
-                    item.classList.toggle('active', parseInt(item.dataset.id) === playlistId);
-                });
+                this.persistPlaybackState({ playlistId, currentIndex: 0, currentSongId: null, currentTime: 0 });
 
                 // 不自动播放，只显示提示
                 // 如果当前有播放的歌曲，保持播放状态
@@ -126,26 +248,30 @@ class MusicApp {
     }
 
     // 播放歌曲
-    async playTrack(index) {
+    async playTrack(index, options = {}) {
+        const { autoPlay = true } = options;
         if (index < 0 || index >= this.player.playlist.length) return;
 
         this.player.currentIndex = index;
         const song = this.player.playlist[index];
 
         await this.player.loadSong(song);
-        this.player.play();
+        if (autoPlay) {
+            this.player.play();
+        } else {
+            this.player.pause();
+        }
         this.ui.updateSongInfo(song);
-
-        // 获取歌词
-        await this.loadLyrics(song.id);
 
         // 更新列表状态
         this.ui.renderTrackList(this.player.playlist, index);
+        this.persistPlaybackState({ currentIndex: index, currentSongId: song.id, currentTime: 0 });
     }
 
     // 加载歌词
     async loadLyrics(songId) {
         try {
+            this.lyricParser.clearSelection();
             const result = await API.getLyric(songId);
             if (result.lrc) {
                 this.lyricParser.parseJSON(result);
@@ -169,13 +295,12 @@ class MusicApp {
             const songs = await this.playlistManager.getSongDetail([songId]);
             if (songs && songs.length > 0) {
                 // 创建临时播放列表
+                this.playlistManager.currentPlaylist = null;
                 this.player.setPlaylist(songs, 0);
                 await this.player.loadSong(songs[0]);
                 this.player.play();
                 this.ui.updateSongInfo(songs[0]);
                 this.ui.renderTrackList(songs, 0);
-
-                await this.loadLyrics(songId);
 
                 this.ui.showToast('已播放: ' + songs[0].name, 'success');
             }
@@ -201,6 +326,19 @@ class MusicApp {
     // 处理加载元数据
     handleLoadedMetadata() {
         const duration = this.player.getDuration();
+        if (this.pendingRestoreState && this.player.currentSong?.id === this.pendingRestoreState.songId) {
+            const restoreTime = Math.min(this.pendingRestoreState.time, Math.max(0, duration - 1));
+            if (restoreTime > 0) {
+                this.player.seek(restoreTime);
+                this.ui.updateProgressBar(duration ? (restoreTime / duration) * 100 : 0);
+                this.ui.updateTimeDisplay(restoreTime, duration);
+            } else {
+                this.ui.updateTimeDisplay(0, duration);
+            }
+            this.pendingRestoreState = null;
+            return;
+        }
+
         this.ui.updateTimeDisplay(0, duration);
     }
 
@@ -215,6 +353,11 @@ class MusicApp {
 
         // 更新时间
         this.ui.updateTimeDisplay(current, total);
+
+        if (this.playlistManager.currentPlaylist?.id && Math.abs(current - this.lastPersistedTime) >= 5) {
+            this.lastPersistedTime = Math.floor(current);
+            this.persistPlaybackState({ currentTime: this.lastPersistedTime });
+        }
 
         // 更新歌词高亮
         const lineIndex = this.lyricParser.getCurrentLine(current);
@@ -245,6 +388,18 @@ class MusicApp {
         this.ui.showToast('播放出错: ' + error.message, 'error');
     }
 
+    requestLogin() {
+        this.ui.showLoginModal();
+        this.startQrLogin();
+    }
+
+    stopQrLoginCheck() {
+        if (this.qrCheckTimer) {
+            clearInterval(this.qrCheckTimer);
+            this.qrCheckTimer = null;
+        }
+    }
+
     // 处理喜欢/取消喜欢
     async handleLike() {
         const currentSong = this.player.currentSong;
@@ -256,7 +411,7 @@ class MusicApp {
         // 检查是否已登录
         if (!this.isLoggedIn) {
             this.ui.showToast('请先登录', 'info');
-            this.ui.showLoginModal();
+            this.requestLogin();
             return;
         }
 
@@ -305,6 +460,11 @@ class MusicApp {
 
     // 处理歌曲加载完成（切换歌曲时更新UI）
     handleSongLoaded(song) {
+        this.player.stopLoop();
+        this.lyricParser.clearSelection();
+        this.ui.hideLoopModal();
+        this.isLoopPlaying = false;
+
         // 更新歌曲信息
         this.ui.updateSongInfo(song);
         // 更新列表状态
@@ -330,6 +490,7 @@ class MusicApp {
     handleVolumeChange(percent) {
         this.player.setVolume(percent);
         this.ui.updateVolumeIcon(percent);
+        this.persistPlaybackState({ volume: this.player.volume });
     }
 
     // 处理音量切换
@@ -341,6 +502,8 @@ class MusicApp {
             this.player.setVolume(70);
             this.ui.updateVolumeIcon(70);
         }
+        this.ui.updateVolumeBar(this.player.volume);
+        this.persistPlaybackState({ volume: this.player.volume });
     }
 
     // 处理歌词点击
@@ -371,10 +534,12 @@ class MusicApp {
         if (!keywords) return;
 
         try {
-            const result = await this.playlistManager.search(keywords, 1);
-            if (result && result.result && result.result.songs) {
-                const songs = await this.playlistManager.parseSearchResult(result, 1);
-                this.ui.showSearchResults(songs);
+            const result = await this.playlistManager.search(keywords, this.searchType);
+            const dataKey = this.searchType === 1000 ? 'playlists' : this.searchType === 100 ? 'artists' : 'songs';
+            if (result && result.result && result.result[dataKey]) {
+                const items = await this.playlistManager.parseSearchResult(result, this.searchType);
+                this.ui.showSearchResults(items, this.searchType);
+                this.persistPlaybackState({ searchType: this.searchType });
             } else {
                 this.ui.showToast('未找到相关结果', 'info');
             }
@@ -384,9 +549,90 @@ class MusicApp {
         }
     }
 
+    handleSearchInput(keywords) {
+        clearTimeout(this.searchSuggestTimer);
+
+        if (!keywords.trim()) {
+            this.ui.hideSearchResults();
+            return;
+        }
+
+        if (keywords.trim().length < 2) return;
+
+        this.searchSuggestTimer = setTimeout(async () => {
+            try {
+                const result = await API.searchSuggest(keywords.trim());
+                const suggestions = (result.result?.allMatch || [])
+                    .map(item => item.keyword)
+                    .filter(Boolean);
+
+                if (this.ui.searchInput.value.trim() === keywords.trim()) {
+                    this.ui.showSearchSuggestions(suggestions);
+                }
+            } catch (error) {
+                console.error('获取搜索建议失败:', error);
+            }
+        }, 250);
+    }
+
+    handleSearchTypeChange(type) {
+        this.searchType = type;
+        this.ui.setSearchType(type);
+        this.persistPlaybackState({ searchType: type });
+
+        if (this.ui.searchInput.value.trim()) {
+            this.handleSearch();
+        } else {
+            this.ui.hideSearchResults();
+        }
+    }
+
+    handleSearchSuggestionClick(keyword) {
+        this.ui.searchInput.value = keyword;
+        this.handleSearch();
+    }
+
+    async handleSearchResultClick(item) {
+        if (!item || !item.id) return;
+
+        if (item.type === 'playlist') {
+            this.ui.hideSearchResults();
+            await this.selectPlaylist(item.id);
+            return;
+        }
+
+        if (item.type === 'artist') {
+            this.ui.hideSearchResults();
+            await this.playArtistTopSongs(item.id, item.name);
+            return;
+        }
+
+        await this.playSearchResult(item.id);
+    }
+
+    async playArtistTopSongs(artistId, artistName = '该歌手') {
+        try {
+            const songs = await this.playlistManager.getArtistTopSongs(artistId);
+            if (!songs.length) {
+                this.ui.showToast('未找到该歌手热门歌曲', 'info');
+                return;
+            }
+
+            this.playlistManager.currentPlaylist = null;
+            this.player.setPlaylist(songs, 0);
+            await this.playTrack(0);
+            this.ui.showToast(`已载入 ${artistName} 热门歌曲`, 'success');
+        } catch (error) {
+            console.error('载入歌手热门歌曲失败:', error);
+            this.ui.showToast('载入歌手热门歌曲失败', 'error');
+        }
+    }
+
     // 登录功能
     async startQrLogin() {
         try {
+            this.stopQrLoginCheck();
+
             // 获取二维码key
             const keyResult = await API.getQrKey();
             const key = keyResult.data.unikey;
@@ -405,13 +651,13 @@ class MusicApp {
 
                     if (checkResult.code === 200) {
                         // 登录成功
-                        clearInterval(this.qrCheckTimer);
+                        this.stopQrLoginCheck();
                         this.ui.qrcodeStatus.textContent = '登录成功';
                         this.ui.hideLoginModal();
                         this.ui.showToast('登录成功', 'success');
                         await this.loadUserInfo();
                     } else if (checkResult.code === 301) {
-                        clearInterval(this.qrCheckTimer);
+                        this.stopQrLoginCheck();
                         this.ui.qrcodeStatus.textContent = '二维码已过期';
                         this.ui.showToast('二维码已过期，请重新扫码', 'error');
                     } else if (checkResult.code === 802) {
@@ -499,7 +745,8 @@ class MusicApp {
 
                 // 获取用户歌单
                 await this.playlistManager.getUserPlaylists(this.user.id);
-                this.ui.renderPlaylists(this.playlistManager.playlists);
+                this.ui.renderPlaylists(this.playlistManager.playlists, this.playlistManager.currentPlaylist?.id);
+                await this.tryRestorePlaybackSession();
 
                 this.ui.showToast('欢迎, ' + this.user.nickname, 'success');
             }
@@ -510,6 +757,7 @@ class MusicApp {
 
     // 退出登录
     logout() {
+        this.stopQrLoginCheck();
         this.isLoggedIn = false;
         this.user = null;
         API.clearCookie();
@@ -541,6 +789,7 @@ class MusicApp {
         document.getElementById('loopModeBtn')?.addEventListener('click', () => {
             const mode = this.player.toggleLoopMode();
             this.ui.updateLoopMode(mode);
+            this.persistPlaybackState({ loopMode: mode });
         });
 
         // 下载
@@ -561,6 +810,7 @@ class MusicApp {
 
                 const quality = parseInt(btn.dataset.quality);
                 this.player.setQuality(quality);
+                this.persistPlaybackState({ quality });
 
                 // 重新加载当前歌曲并播放
                 if (this.player.currentSong) {
@@ -569,12 +819,6 @@ class MusicApp {
                     this.ui.showToast('已切换到 ' + quality + 'k 音质', 'success');
                 }
             });
-        });
-
-        // 登录按钮
-        document.getElementById('loginBtn')?.addEventListener('click', () => {
-            this.ui.showLoginModal();
-            this.startQrLogin();
         });
 
         // 发送验证码
@@ -596,6 +840,7 @@ class MusicApp {
             this.ui.hideLoopModal();
             this.player.stopLoop();
             this.lyricParser.clearSelection();
+            this.ui.renderLyrics(this.lyricParser.formatForDisplay());
             this.isLoopPlaying = false;
         });
 
