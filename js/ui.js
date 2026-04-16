@@ -7,10 +7,14 @@ class UIManager {
         // 状态
         this.isLiked = false;
         this.currentSongId = null;
+        this.bgObjectUrl = null;
+        this.cropFile = null;
+        this.backgroundDbPromise = null;
 
         // 歌词滚动状态
         this.isUserScrolling = false; // 用户是否手动滚动
         this.autoScrollTimeout = null; // 自动滚动恢复的定时器
+        this.lyricScrollDetectionBound = false;
 
         // 缓存DOM元素
         this.cacheElements();
@@ -161,7 +165,9 @@ class UIManager {
         this.initGlassEffect();
 
         // 恢复背景图片
-        this.restoreBackgroundImage();
+        this.restoreBackgroundImage().catch((error) => {
+            console.error('恢复背景图片失败:', error);
+        });
 
         // 右侧面板
         this.rightPanel?.addEventListener('mouseenter', () => {
@@ -187,6 +193,8 @@ class UIManager {
                 this.bgImage.style.backgroundImage = '';
                 this.bgImage.classList.remove('custom-bg');
                 localStorage.setItem('bgSource', 'cover');
+                localStorage.removeItem('bgCustomType');
+                localStorage.removeItem('bgVideoMime');
             }
         });
 
@@ -251,6 +259,61 @@ class UIManager {
                 this.hideSearchResults();
             }
         });
+    }
+
+    createFallbackCover(size = 48) {
+        return `data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='${size}' height='${size}'%3E%3Crect fill='%231a1a2e' width='${size}' height='${size}'/%3E%3Ccircle cx='${size / 2}' cy='${size / 2}' r='${Math.max(8, Math.floor(size / 4))}' fill='%23333' opacity='0.5'/%3E%3C/svg%3E`;
+    }
+
+    sanitizeUrl(value, fallback = '') {
+        if (!value) {
+            return fallback;
+        }
+
+        const raw = String(value).trim();
+        if (!raw) {
+            return fallback;
+        }
+
+        if (raw.startsWith('data:image/') || raw.startsWith('data:video/') || raw.startsWith('blob:')) {
+            return raw;
+        }
+
+        try {
+            const parsed = new URL(raw, window.location.origin);
+            if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+                return parsed.href;
+            }
+        } catch (error) {
+            console.warn('[UI] 非法资源地址已忽略:', raw);
+        }
+
+        return fallback;
+    }
+
+    createSafeImage(src, alt, className, fallback) {
+        const img = document.createElement('img');
+        img.className = className;
+        img.alt = alt || '';
+
+        const safeFallback = fallback || this.createFallbackCover();
+        img.src = this.sanitizeUrl(src, safeFallback);
+        img.addEventListener('error', () => {
+            img.src = safeFallback;
+        }, { once: true });
+
+        return img;
+    }
+
+    createDiv(className, text) {
+        const div = document.createElement('div');
+        if (className) {
+            div.className = className;
+        }
+        if (text !== undefined && text !== null) {
+            div.textContent = text;
+        }
+        return div;
     }
 
     // 进度条
@@ -420,8 +483,10 @@ class UIManager {
         if (!song) return;
 
         // 封面
-        const coverUrl = song.cover || song.album?.picUrl || song.al?.picUrl ||
-            'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="300" height="300"%3E%3Crect fill="%231a1a2e" width="300" height="300"/%3E%3Ctext x="50%25" y="50%25" dominant-baseline="middle" text-anchor="middle" fill="%23ff6b9d" font-size="80"%3E♪%3C/text%3E%3C/svg%3E';
+        const coverUrl = this.sanitizeUrl(
+            song.cover || song.album?.picUrl || song.al?.picUrl,
+            this.createFallbackCover(300)
+        );
 
         this.coverImage.src = coverUrl;
         this.playerCover.src = coverUrl;
@@ -482,7 +547,8 @@ class UIManager {
         if (this.bgSource?.value !== 'cover') return;
 
         if (this.bgImage) {
-            this.bgImage.style.backgroundImage = `url(${url})`;
+            const safeUrl = this.sanitizeUrl(url);
+            this.bgImage.style.backgroundImage = safeUrl ? `url("${safeUrl}")` : '';
         }
     }
 
@@ -571,6 +637,8 @@ class UIManager {
         const file = e.target.files[0];
         if (!file) return;
 
+        this.cropFile = file;
+
         const reader = new FileReader();
 
         reader.onload = (event) => {
@@ -586,6 +654,116 @@ class UIManager {
         };
 
         reader.readAsDataURL(file);
+    }
+
+    setCustomBackgroundType(type) {
+        if (type) {
+            localStorage.setItem('bgCustomType', type);
+        } else {
+            localStorage.removeItem('bgCustomType');
+        }
+    }
+
+    revokeBackgroundObjectUrl() {
+        if (this.bgObjectUrl) {
+            URL.revokeObjectURL(this.bgObjectUrl);
+            this.bgObjectUrl = null;
+        }
+    }
+
+    openBackgroundDatabase() {
+        if (this.backgroundDbPromise) {
+            return this.backgroundDbPromise;
+        }
+
+        this.backgroundDbPromise = new Promise((resolve, reject) => {
+            const request = window.indexedDB.open('CloudMusicProPlayer', 1);
+
+            request.onupgradeneeded = () => {
+                const db = request.result;
+                if (!db.objectStoreNames.contains('backgrounds')) {
+                    db.createObjectStore('backgrounds');
+                }
+            };
+
+            request.onsuccess = () => {
+                resolve(request.result);
+            };
+
+            request.onerror = () => {
+                reject(request.error || new Error('打开背景数据库失败'));
+            };
+        });
+
+        return this.backgroundDbPromise;
+    }
+
+    async saveCustomBackgroundBlob(blob) {
+        const db = await this.openBackgroundDatabase();
+
+        await new Promise((resolve, reject) => {
+            const tx = db.transaction('backgrounds', 'readwrite');
+            const store = tx.objectStore('backgrounds');
+            store.put(blob, 'custom-image');
+
+            tx.oncomplete = () => resolve();
+            tx.onerror = () => reject(tx.error || new Error('保存背景图片失败'));
+            tx.onabort = () => reject(tx.error || new Error('保存背景图片被中断'));
+        });
+    }
+
+    async loadCustomBackgroundBlob() {
+        const db = await this.openBackgroundDatabase();
+
+        return new Promise((resolve, reject) => {
+            const tx = db.transaction('backgrounds', 'readonly');
+            const store = tx.objectStore('backgrounds');
+            const request = store.get('custom-image');
+
+            request.onsuccess = () => {
+                resolve(request.result || null);
+            };
+            request.onerror = () => {
+                reject(request.error || new Error('读取背景图片失败'));
+            };
+        });
+    }
+
+    async clearCustomBackgroundBlob() {
+        const db = await this.openBackgroundDatabase();
+
+        await new Promise((resolve, reject) => {
+            const tx = db.transaction('backgrounds', 'readwrite');
+            const store = tx.objectStore('backgrounds');
+            store.delete('custom-image');
+
+            tx.oncomplete = () => resolve();
+            tx.onerror = () => reject(tx.error || new Error('清理背景图片失败'));
+            tx.onabort = () => reject(tx.error || new Error('清理背景图片被中断'));
+        });
+    }
+
+    dataUrlToBlob(dataUrl) {
+        const [header, base64] = String(dataUrl || '').split(',');
+        const mimeMatch = header?.match(/data:(.*?);base64/);
+        const mimeType = mimeMatch?.[1] || 'image/png';
+        const binary = atob(base64 || '');
+        const bytes = new Uint8Array(binary.length);
+
+        for (let i = 0; i < binary.length; i += 1) {
+            bytes[i] = binary.charCodeAt(i);
+        }
+
+        return new Blob([bytes], { type: mimeType });
+    }
+
+    applyCustomBackgroundImage(imageUrl, settings = {}) {
+        if (!this.bgImage) return;
+
+        this.bgImage.style.backgroundImage = `url(${imageUrl})`;
+        this.bgImage.style.backgroundSize = `${settings.zoom || 100}%`;
+        this.bgImage.style.backgroundPosition = `${settings.posX || 50}% ${settings.posY || 50}%`;
+        this.bgImage.classList.add('custom-bg');
     }
 
     // 保存背景图片到 localStorage
@@ -605,22 +783,39 @@ class UIManager {
     }
 
     // 恢复背景图片
-    restoreBackgroundImage() {
+    async restoreBackgroundImage() {
         const bgSource = localStorage.getItem('bgSource');
+        const bgCustomType = localStorage.getItem('bgCustomType');
         const bgSettingsStr = localStorage.getItem('customBgSettings');
         const bgSettings = bgSettingsStr ? JSON.parse(bgSettingsStr) : null;
 
         // 恢复亮度、模糊度、透明度设置
         this.restoreBgEffectSettings();
 
-        if (bgSource === 'custom' && bgSettings && bgSettings.image) {
-            // 从 customBgSettings 中恢复图片数据
-            this.bgImage.style.backgroundImage = `url(${bgSettings.image})`;
-            this.bgImage.classList.add('custom-bg');
+        const shouldRestoreImage = bgSource === 'custom'
+            && (bgCustomType === 'image' || !bgCustomType);
 
-            // 恢复位置和缩放设置
-            this.bgImage.style.backgroundSize = `${bgSettings.zoom || 100}%`;
-            this.bgImage.style.backgroundPosition = `${bgSettings.posX || 50}% ${bgSettings.posY || 50}%`;
+        if (shouldRestoreImage) {
+            const legacyImage = bgSettings?.image || '';
+            let imageUrl = legacyImage;
+
+            if (!imageUrl) {
+                const imageBlob = await this.loadCustomBackgroundBlob().catch(() => null);
+                if (imageBlob) {
+                    this.revokeBackgroundObjectUrl();
+                    this.bgObjectUrl = URL.createObjectURL(imageBlob);
+                    imageUrl = this.bgObjectUrl;
+                }
+            }
+
+            if (!imageUrl) {
+                localStorage.setItem('bgSource', 'cover');
+                this.setCustomBackgroundType(null);
+                this.showToast('自定义背景未找到，已恢复为歌曲封面', 'info');
+                return;
+            }
+
+            this.applyCustomBackgroundImage(imageUrl, bgSettings || {});
 
             if (this.bgSource) {
                 this.bgSource.value = 'custom';
@@ -628,6 +823,15 @@ class UIManager {
             if (this.bgUpload) {
                 this.bgUpload.style.display = 'block';
             }
+        } else if (bgSource === 'custom' && bgCustomType === 'video') {
+            localStorage.setItem('bgSource', 'cover');
+            if (this.bgSource) {
+                this.bgSource.value = 'cover';
+            }
+            if (this.bgUpload) {
+                this.bgUpload.style.display = 'none';
+            }
+            this.showToast('视频背景暂不支持重启后恢复，已切回歌曲封面', 'info');
         } else if (bgSource === 'custom') {
             // 没有图片数据，检查是否是之前的视频背景（已失效）
             this.checkVideoBg();
@@ -685,6 +889,7 @@ class UIManager {
         // 保存到 localStorage（仅保存设置，不保存视频数据）
         localStorage.setItem('bgSource', 'custom');
         localStorage.setItem('bgVideoMime', mimeType);
+        this.setCustomBackgroundType('video');
 
         // 视频背景无法持久化（localStorage限制），提示用户
         this.showToast('视频背景已更新（注意：刷新页面后视频背景将恢复为封面）', 'info');
@@ -694,13 +899,15 @@ class UIManager {
     checkVideoBg() {
         const bgSource = localStorage.getItem('bgSource');
         const bgVideoMime = localStorage.getItem('bgVideoMime');
+        const bgCustomType = localStorage.getItem('bgCustomType');
 
-        if (bgSource === 'custom' && !localStorage.getItem('customBgSettings')) {
+        if (bgSource === 'custom' && (bgCustomType === 'video' || !localStorage.getItem('customBgSettings'))) {
             // 有 customBgSettings 说明是图片背景，否则检查是否是视频
             // 如果没有图片数据且之前设置过视频背景，提示用户
             if (bgVideoMime) {
                 // 之前的视频背景已失效，恢复为封面
                 localStorage.setItem('bgSource', 'cover');
+                localStorage.removeItem('bgCustomType');
                 this.showToast('视频背景已失效，已恢复为歌曲封面', 'info');
             }
         }
@@ -756,7 +963,7 @@ class UIManager {
     }
 
     // 应用裁剪（保存设置）
-    applyCrop() {
+    async applyCrop() {
         if (!this.cropData) return;
 
         const zoom = this.cropZoom?.value || 100;
@@ -764,22 +971,26 @@ class UIManager {
         const posY = this.cropPosY?.value || 50;
 
         // 应用到实际背景
-        if (this.bgImage) {
-            this.bgImage.style.backgroundImage = `url(${this.cropData})`;
-            this.bgImage.style.backgroundSize = `${zoom}%`;
-            this.bgImage.style.backgroundPosition = `${posX}% ${posY}%`;
-            this.bgImage.classList.add('custom-bg');
-        }
+        this.applyCustomBackgroundImage(this.cropData, { zoom, posX, posY });
 
-        // 保存设置到 localStorage
         const bgSettings = {
-            image: this.cropData,
             zoom: zoom,
             posX: posX,
             posY: posY
         };
-        localStorage.setItem('customBgSettings', JSON.stringify(bgSettings));
-        localStorage.setItem('bgSource', 'custom');
+
+        try {
+            localStorage.setItem('customBgSettings', JSON.stringify(bgSettings));
+            localStorage.setItem('bgSource', 'custom');
+            localStorage.removeItem('bgVideoMime');
+            this.setCustomBackgroundType('image');
+            const imageBlob = this.cropFile instanceof Blob ? this.cropFile : this.dataUrlToBlob(this.cropData);
+            await this.saveCustomBackgroundBlob(imageBlob);
+        } catch (error) {
+            console.error('保存背景图片失败:', error);
+            this.showToast('背景图片保存失败，请重试或换一张图片', 'error');
+            return;
+        }
 
         this.hideCropModal();
         this.showToast('背景图片已调整并应用', 'success');
@@ -789,22 +1000,34 @@ class UIManager {
     renderPlaylists(playlists, activePlaylistId = null) {
         if (!this.playlistList) return;
 
-        // 使用右侧侧边栏的样式类名
-        this.playlistList.innerHTML = playlists.map((playlist, index) => `
-            <div class="panel-playlist-item ${(activePlaylistId ? playlist.id === activePlaylistId : index === 0) ? 'active' : ''}" data-id="${playlist.id}">
-                <img src="${playlist.cover || 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="36" height="36"%3E%3Crect fill="%231a1a2e" width="36" height="36"/%3E%3C/svg%3E'}" alt="${playlist.name}" class="panel-playlist-cover">
-                <div class="panel-playlist-info">
-                    <div class="panel-playlist-name">${playlist.name}</div>
-                    <div class="panel-playlist-count">${playlist.count || 0}首</div>
-                </div>
-            </div>
-        `).join('');
+        this.playlistList.replaceChildren();
 
-        // 绑定点击事件
-        this.playlistList.querySelectorAll('.panel-playlist-item').forEach(item => {
+        playlists.forEach((playlist, index) => {
+            const item = this.createDiv('panel-playlist-item');
+            if ((activePlaylistId ? playlist.id === activePlaylistId : index === 0)) {
+                item.classList.add('active');
+            }
+            item.dataset.id = String(playlist.id);
+
+            const cover = this.createSafeImage(
+                playlist.cover,
+                playlist.name,
+                'panel-playlist-cover',
+                this.createFallbackCover(36)
+            );
+
+            const info = this.createDiv('panel-playlist-info');
+            info.append(
+                this.createDiv('panel-playlist-name', playlist.name || '未命名歌单'),
+                this.createDiv('panel-playlist-count', `${playlist.count || 0}首`)
+            );
+
+            item.append(cover, info);
             item.addEventListener('click', () => {
-                this.onPlaylistSelect?.(parseInt(item.dataset.id));
+                this.onPlaylistSelect?.(parseInt(item.dataset.id, 10));
             });
+
+            this.playlistList.appendChild(item);
         });
     }
 
@@ -812,24 +1035,42 @@ class UIManager {
     renderTrackList(songs, currentIndex = -1) {
         if (!this.trackList) return;
 
-        // 使用右侧侧边栏的歌曲列表样式
-        this.trackList.innerHTML = songs.map((song, index) => `
-            <div class="panel-track-item ${index === currentIndex ? 'playing' : ''}" data-index="${index}">
-                <span class="track-num">${String(index + 1).padStart(2, '0')}</span>
-                <img src="${song.cover || 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="32" height="32"%3E%3Crect fill="%231a1a2e" width="32" height="32"/%3E%3C/svg%3E'}" alt="${song.name}" class="track-cover">
-                <div class="track-info">
-                    <div class="track-title">${song.name}</div>
-                    <div class="track-artist">${song.artist}</div>
-                </div>
-                <span class="track-duration">${song.durationStr}</span>
-            </div>
-        `).join('');
+        this.trackList.replaceChildren();
 
-        // 绑定点击事件
-        this.trackList.querySelectorAll('.panel-track-item').forEach(item => {
+        songs.forEach((song, index) => {
+            const item = this.createDiv('panel-track-item');
+            if (index === currentIndex) {
+                item.classList.add('playing');
+            }
+            item.dataset.index = String(index);
+
+            const num = document.createElement('span');
+            num.className = 'track-num';
+            num.textContent = String(index + 1).padStart(2, '0');
+
+            const cover = this.createSafeImage(
+                song.cover,
+                song.name,
+                'track-cover',
+                this.createFallbackCover(32)
+            );
+
+            const info = this.createDiv('track-info');
+            info.append(
+                this.createDiv('track-title', song.name || '未知歌曲'),
+                this.createDiv('track-artist', song.artist || '未知艺术家')
+            );
+
+            const duration = document.createElement('span');
+            duration.className = 'track-duration';
+            duration.textContent = song.durationStr || '--:--';
+
+            item.append(num, cover, info, duration);
             item.addEventListener('click', () => {
-                this.onTrackSelect?.(parseInt(item.dataset.index));
+                this.onTrackSelect?.(parseInt(item.dataset.index, 10));
             });
+
+            this.trackList.appendChild(item);
         });
     }
 
@@ -837,33 +1078,45 @@ class UIManager {
     renderLyrics(lyrics) {
         if (!this.lyricContent) return;
 
+        this.lyricContent.replaceChildren();
+
         if (!lyrics || lyrics.length === 0) {
-            this.lyricContent.innerHTML = '<div class="lyric-line" data-time="0">暂无歌词</div>';
+            const emptyLine = this.createDiv('lyric-line', '暂无歌词');
+            emptyLine.dataset.time = '0';
+            this.lyricContent.appendChild(emptyLine);
+            this.initLyricScrollDetection();
             return;
         }
 
-        this.lyricContent.innerHTML = lyrics.map((line, index) => `
-            <div class="lyric-line ${line.translated ? 'has-trans' : ''} ${line.selected ? 'selected' : ''}" data-index="${index}" data-time="${line.time}">
-                ${line.content || '♪'}
-                ${line.translated ? `<div class="lyric-translated">${line.translated}</div>` : ''}
-            </div>
-        `).join('');
+        lyrics.forEach((line, index) => {
+            const lineEl = this.createDiv('lyric-line', line.content || '♪');
+            if (line.translated) {
+                lineEl.classList.add('has-trans');
+            }
+            if (line.selected) {
+                lineEl.classList.add('selected');
+            }
+            lineEl.dataset.index = String(index);
+            lineEl.dataset.time = String(line.time ?? 0);
 
-        // 绑定歌词点击事件
-        this.lyricContent.querySelectorAll('.lyric-line').forEach(line => {
-            line.addEventListener('click', (e) => {
+            if (line.translated) {
+                lineEl.appendChild(this.createDiv('lyric-translated', line.translated));
+            }
+
+            lineEl.addEventListener('click', (e) => {
                 const isMultiSelect = e.shiftKey;
-                this.onLyricClick?.(parseInt(line.dataset.index), isMultiSelect);
+                this.onLyricClick?.(parseInt(lineEl.dataset.index, 10), isMultiSelect);
             });
+
+            this.lyricContent.appendChild(lineEl);
         });
 
-        // 监听歌词容器滚动事件（检测用户手动滚动）
         this.initLyricScrollDetection();
     }
 
     // 初始化歌词滚动检测
     initLyricScrollDetection() {
-        if (!this.lyricContent) return;
+        if (!this.lyricContent || this.lyricScrollDetectionBound) return;
 
         let scrollStartY = 0;
         let scrollStartTop = 0;
@@ -901,6 +1154,8 @@ class UIManager {
             this.isUserScrolling = true;
             this.resetAutoScrollTimer();
         });
+
+        this.lyricScrollDetectionBound = true;
     }
 
     // 重置自动滚动计时器
@@ -1005,11 +1260,21 @@ class UIManager {
         if (!this.loopLyric || !timeRange) return;
 
         const lines = lyrics.filter(l => l.time >= timeRange.startTime && l.time <= timeRange.endTime);
+        this.loopLyric.replaceChildren();
 
-        this.loopLyric.innerHTML = lines.map(line => `
-            <p>${line.content}</p>
-            ${line.translated ? `<p style="color: var(--text-secondary); font-size: 14px;">${line.translated}</p>` : ''}
-        `).join('');
+        lines.forEach(line => {
+            const content = document.createElement('p');
+            content.textContent = line.content || '♪';
+            this.loopLyric.appendChild(content);
+
+            if (line.translated) {
+                const translated = document.createElement('p');
+                translated.textContent = line.translated;
+                translated.style.color = 'var(--text-secondary)';
+                translated.style.fontSize = '14px';
+                this.loopLyric.appendChild(translated);
+            }
+        });
 
         this.loopStartTime.textContent = Player.formatTime(timeRange.startTime);
         this.loopEndTime.textContent = Player.formatTime(timeRange.endTime);
@@ -1030,31 +1295,48 @@ class UIManager {
 
     // 更新用户信息
     updateUserInfo(user) {
+        if (!this.userInfo || !this.accountInfo) return;
+
         if (!user) {
-            this.userInfo.innerHTML = '<button class="login-btn" id="loginBtn">登录</button>';
-            this.accountInfo.innerHTML = '<p class="not-login">未登录</p>';
-            document.getElementById('loginBtn')?.addEventListener('click', () => this.onLoginRequest?.());
+            const loginBtn = document.createElement('button');
+            loginBtn.id = 'loginBtn';
+            loginBtn.className = 'login-btn';
+            loginBtn.textContent = '登录';
+            loginBtn.addEventListener('click', () => this.onLoginRequest?.());
+
+            const notLogin = document.createElement('p');
+            notLogin.className = 'not-login';
+            notLogin.textContent = '未登录';
+
+            this.userInfo.replaceChildren(loginBtn);
+            this.accountInfo.replaceChildren(notLogin);
+            this.loginBtn = loginBtn;
             return;
         }
 
-        this.userInfo.innerHTML = `
-            <div class="user-logged">
-                <img src="${user.avatarUrl}" alt="${user.nickname}" class="user-avatar">
-                <span class="user-nickname">${user.nickname}</span>
-            </div>
-        `;
+        const userLogged = this.createDiv('user-logged');
+        userLogged.append(
+            this.createSafeImage(user.avatarUrl, user.nickname, 'user-avatar', this.createFallbackCover(40)),
+            this.createDiv('user-nickname', user.nickname || '用户')
+        );
 
-        this.accountInfo.innerHTML = `
-            <div class="account-logged">
-                <img src="${user.avatarUrl}" alt="${user.nickname}">
-                <p class="panel-song-title">${user.nickname}</p>
-                <button class="logout-btn" id="logoutBtn">退出登录</button>
-            </div>
-        `;
+        const accountLogged = this.createDiv('account-logged');
+        const accountAvatar = this.createSafeImage(user.avatarUrl, user.nickname, '', this.createFallbackCover(56));
+        const nickname = document.createElement('p');
+        nickname.className = 'panel-song-title';
+        nickname.textContent = user.nickname || '用户';
 
-        document.getElementById('logoutBtn')?.addEventListener('click', () => {
+        const logoutBtn = document.createElement('button');
+        logoutBtn.id = 'logoutBtn';
+        logoutBtn.className = 'logout-btn';
+        logoutBtn.textContent = '退出登录';
+        logoutBtn.addEventListener('click', () => {
             this.onLogout?.();
         });
+
+        accountLogged.append(accountAvatar, nickname, logoutBtn);
+        this.userInfo.replaceChildren(userLogged);
+        this.accountInfo.replaceChildren(accountLogged);
     }
 
     // 搜索结果显示
@@ -1066,38 +1348,36 @@ class UIManager {
             return;
         }
 
-        this.searchResults.innerHTML = `
-            <div class="search-section-title">搜索建议</div>
-            ${suggestions.slice(0, 8).map(keyword => `
-                <div class="search-result-item suggestion-item" data-keyword="${keyword}">
-                    <div class="search-result-icon">⌕</div>
-                    <div class="search-result-info">
-                        <div class="search-result-title">${keyword}</div>
-                    </div>
-                </div>
-            `).join('')}
-        `;
+        this.searchResults.replaceChildren();
+        this.searchResults.appendChild(this.createDiv('search-section-title', '搜索建议'));
 
-        this.searchResults.classList.add('active');
+        suggestions.slice(0, 8).forEach(keyword => {
+            const item = this.createDiv('search-result-item suggestion-item');
+            item.dataset.keyword = String(keyword || '');
 
-        this.searchResults.querySelectorAll('.suggestion-item').forEach(item => {
+            const icon = this.createDiv('search-result-icon', '⌕');
+            const info = this.createDiv('search-result-info');
+            info.appendChild(this.createDiv('search-result-title', keyword || ''));
+
+            item.append(icon, info);
             item.addEventListener('click', () => {
                 this.onSearchSuggestionClick?.(item.dataset.keyword);
             });
+
+            this.searchResults.appendChild(item);
         });
+
+        this.searchResults.classList.add('active');
     }
 
     showSearchResults(results, searchType = 1) {
         if (!this.searchResults) return;
 
         if (!results || results.length === 0) {
-            this.searchResults.innerHTML = '<div class="search-empty">未找到相关结果</div>';
+            this.searchResults.replaceChildren(this.createDiv('search-empty', '未找到相关结果'));
             this.searchResults.classList.add('active');
             return;
         }
-
-        // 默认封面SVG
-        const defaultCover = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="48" height="48"%3E%3Crect fill="%231a1a2e" width="48" height="48"/%3E%3Ccircle cx="24" cy="24" r="12" fill="%23333" opacity="0.5"/%3E%3C/svg%3E';
 
         const titleMap = {
             1: '单曲结果',
@@ -1105,46 +1385,58 @@ class UIManager {
             100: '歌手结果'
         };
 
-        const itemsHtml = results.slice(0, 10).map(item => {
+        this.searchResults.replaceChildren();
+        this.searchResults.appendChild(
+            this.createDiv('search-section-title', titleMap[searchType] || '搜索结果')
+        );
+
+        results.slice(0, 10).forEach(item => {
             const itemType = item.type || (searchType === 100 ? 'artist' : searchType === 1000 ? 'playlist' : 'song');
             const meta = itemType === 'song'
                 ? `${item.artist || '未知艺术家'} · ${item.album || '未知专辑'}`
                 : (item.subtitle || '');
             const duration = itemType === 'song' ? (item.durationStr || '--:--') : '';
-            const icon = itemType === 'artist' ? '♫' : itemType === 'playlist' ? '☰' : '';
-            const media = item.cover
-                ? `<img src="${item.cover}" alt="${item.name}" class="result-cover" onerror="this.src='${defaultCover}'">`
-                : `<div class="search-result-icon">${icon || '♪'}</div>`;
+            const icon = itemType === 'artist' ? '♫' : itemType === 'playlist' ? '☰' : '♪';
 
-            return `
-                <div class="search-result-item" data-id="${item.id}" data-type="${itemType}" data-name="${item.name || ''}">
-                    ${media}
-                    <div class="search-result-info">
-                        <div class="search-result-title">${item.name || '未命名结果'}</div>
-                        ${meta ? `<div class="search-result-artist">${meta}</div>` : ''}
-                    </div>
-                    ${duration ? `<span class="search-result-duration">${duration}</span>` : ''}
-                </div>
-            `;
-        }).join('');
+            const resultItem = this.createDiv('search-result-item');
+            resultItem.dataset.id = String(item.id);
+            resultItem.dataset.type = itemType;
+            resultItem.dataset.name = item.name || '';
 
-        this.searchResults.innerHTML = `
-            <div class="search-section-title">${titleMap[searchType] || '搜索结果'}</div>
-            ${itemsHtml}
-        `;
+            if (item.cover) {
+                resultItem.appendChild(
+                    this.createSafeImage(item.cover, item.name, 'result-cover', this.createFallbackCover(48))
+                );
+            } else {
+                resultItem.appendChild(this.createDiv('search-result-icon', icon));
+            }
 
-        this.searchResults.classList.add('active');
+            const info = this.createDiv('search-result-info');
+            info.appendChild(this.createDiv('search-result-title', item.name || '未命名结果'));
+            if (meta) {
+                info.appendChild(this.createDiv('search-result-artist', meta));
+            }
+            resultItem.appendChild(info);
 
-        // 绑定点击事件
-        this.searchResults.querySelectorAll('.search-result-item').forEach(item => {
-            item.addEventListener('click', () => {
+            if (duration) {
+                const durationEl = document.createElement('span');
+                durationEl.className = 'search-result-duration';
+                durationEl.textContent = duration;
+                resultItem.appendChild(durationEl);
+            }
+
+            resultItem.addEventListener('click', () => {
                 this.onSearchResultClick?.({
-                    id: parseInt(item.dataset.id, 10),
-                    type: item.dataset.type,
-                    name: item.dataset.name
+                    id: parseInt(resultItem.dataset.id, 10),
+                    type: resultItem.dataset.type,
+                    name: resultItem.dataset.name
                 });
             });
+
+            this.searchResults.appendChild(resultItem);
         });
+
+        this.searchResults.classList.add('active');
     }
 
     // 设置旋转唱片

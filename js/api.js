@@ -1,44 +1,74 @@
 /**
  * API模块 - 网易云音乐API封装
- * 使用本地3000端口API服务
+ * 优先读取启动器配置，回退到本地3000端口API服务
  */
 
-const API_BASE = 'http://localhost:3000';
+const DEFAULT_API_BASE = 'http://localhost:3000';
+let configuredApiBase = null;
+let apiBasePromise = null;
+let apiBaseResolved = false;
 
-// Cookie管理
-let cookie = '';
+async function resolveApiBaseFromLauncher() {
+    const savedApiBase = localStorage.getItem('musicApiBase');
+    const fallbackApiBase = savedApiBase || DEFAULT_API_BASE;
+
+    if (window.location.protocol === 'file:') {
+        configuredApiBase = fallbackApiBase;
+        apiBaseResolved = true;
+        return configuredApiBase;
+    }
+
+    try {
+        const response = await fetch(`${window.location.origin}/launcher-config`, {
+            cache: 'no-store'
+        });
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
+
+        const config = await response.json();
+        const apiPort = Number(config.apiPort);
+        if (Number.isInteger(apiPort) && apiPort >= 1 && apiPort <= 65535) {
+            configuredApiBase = `http://${window.location.hostname || 'localhost'}:${apiPort}`;
+            localStorage.setItem('musicApiBase', configuredApiBase);
+            apiBaseResolved = true;
+            return configuredApiBase;
+        }
+    } catch (error) {
+        console.warn('[API] 读取启动器配置失败，使用回退地址:', error.message);
+    }
+
+    configuredApiBase = fallbackApiBase;
+    apiBaseResolved = true;
+    return configuredApiBase;
+}
+
+async function getApiBase() {
+    if (apiBaseResolved && configuredApiBase) {
+        return configuredApiBase;
+    }
+
+    if (!apiBasePromise) {
+        apiBasePromise = resolveApiBaseFromLauncher().finally(() => {
+            apiBasePromise = null;
+        });
+    }
+
+    configuredApiBase = await apiBasePromise;
+    return configuredApiBase;
+}
 
 const API = {
-    // 初始化 - 从localStorage恢复登录状态
+    // 初始化 - 页面重新加载后优先重新读取启动器配置
     init() {
-        const savedCookie = localStorage.getItem('musicCookie');
-        if (savedCookie) {
-            cookie = savedCookie;
-            console.log('[API] 已恢复登录状态');
-            return true;
-        }
+        configuredApiBase = null;
+        apiBasePromise = null;
+        apiBaseResolved = false;
         return false;
-    },
-
-    // 设置Cookie并持久化
-    setCookie(newCookie) {
-        if (newCookie) {
-            cookie = newCookie;
-            // 持久化到 localStorage
-            localStorage.setItem('musicCookie', newCookie);
-            console.log('[API] Cookie已设置并保存:', cookie.substring(0, 50) + '...');
-        }
-    },
-
-    // 获取Cookie
-    getCookie() {
-        return cookie;
     },
 
     // 清除登录信息
     clearCookie() {
-        cookie = '';
-        localStorage.removeItem('musicCookie');
         localStorage.removeItem('musicUserInfo');
     },
 
@@ -64,22 +94,11 @@ const API = {
 
     async checkQrCode(key) {
         const result = await this.request('/login/qr/check', { key, timestamp: Date.now() });
-        // 登录成功后保存cookie
-        if (result.code === 200 && result.cookie) {
-            console.log('[API] 二维码登录成功，保存cookie');
-            this.setCookie(result.cookie);
-        }
         return result;
     },
 
     async loginWithPhone(phone, captcha) {
-        const result = await this.request('/login/cellphone', { phone, captcha });
-        // 登录成功后保存cookie
-        if (result.code === 200 && result.cookie) {
-            console.log('[API] 手机登录成功，保存cookie');
-            this.setCookie(result.cookie);
-        }
-        return result;
+        return this.request('/login/cellphone', { phone, captcha });
     },
 
     async sendCaptcha(phone) {
@@ -172,7 +191,8 @@ const API = {
 
     // 请求方法
     async request(endpoint, params = {}) {
-        const url = new URL(API_BASE + endpoint);
+        const apiBase = await getApiBase();
+        const url = new URL(apiBase + endpoint);
         Object.keys(params).forEach(key => {
             if (params[key] !== undefined && params[key] !== null) {
                 url.searchParams.append(key, params[key]);
@@ -184,28 +204,8 @@ const API = {
             credentials: 'include'
         };
 
-        // 如果有cookie，添加到请求头
-        if (cookie) {
-            options.headers = {
-                'Cookie': cookie
-            };
-            console.log('[API] 请求携带Cookie:', endpoint);
-        }
-
         try {
             const response = await fetch(url.toString(), options);
-
-            // 获取响应头中的cookie
-            const setCookieHeader = response.headers.get('set-cookie');
-            if (setCookieHeader) {
-                console.log('[API] 收到Set-Cookie:', setCookieHeader.substring(0, 80) + '...');
-                // 解析cookie，只取第一个分号前的部分
-                const cookiePart = setCookieHeader.split(';')[0];
-                if (!cookie) {
-                    cookie = cookiePart;
-                    console.log('[API] 从响应保存Cookie');
-                }
-            }
 
             const data = await response.json();
 
@@ -214,7 +214,7 @@ const API = {
 
             if (data.code === 200) {
                 return data;
-            } else if (data.code === 301) {
+            } else if (endpoint === '/login/qr/check' && data.code === 301) {
                 throw new Error('登录二维码已过期，请重新扫码');
             } else if (data.code === 800) {
                 // 二维码未扫描，继续轮询（不抛出错误）
@@ -229,11 +229,8 @@ const API = {
                 return { code: 802, message: 'confirmed' };
             } else if (data.message && (data.message.includes('授权') || data.message.includes('登陆') || data.message.includes('登录')) && data.message.includes('成功')) {
                 // 授权登录成功，但状态码不是200
-                console.log('[API] 登录成功，message:', data.message, 'cookie:', data.cookie ? '有' : '无');
-                if (data.cookie) {
-                    this.setCookie(data.cookie);
-                }
-                return { code: 200, message: '登录成功', cookie: data.cookie };
+                console.log('[API] 登录成功，message:', data.message);
+                return { code: 200, message: '登录成功' };
             } else if (data.code === 301 || data.code === -460) {
                 throw new Error('请先登录');
             } else {

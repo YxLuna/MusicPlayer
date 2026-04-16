@@ -8,6 +8,7 @@ const { spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const http = require('http');
+const net = require('net');
 const { exec } = require('child_process');
 
 // 获取启动器所在目录（即项目根目录）
@@ -40,28 +41,48 @@ function saveConfig(config) {
     console.log(`配置已保存: API端口 = ${config.apiPort}, 播放器端口 = ${config.playerPort}`);
 }
 
-// 杀掉指定端口的进程 (Windows)
-function killPort(port) {
-    return new Promise((resolve) => {
-        exec(`netstat -ano | findstr :${port}`, (err, stdout) => {
-            if (stdout) {
-                const lines = stdout.trim().split('\n');
-                for (const line of lines) {
-                    const parts = line.trim().split(/\s+/);
-                    if (parts[1] && parts[1].includes(port)) {
-                        const pid = parts[4];
-                        if (pid && pid !== '0') {
-                            console.log(`正在释放端口 ${port} (PID: ${pid})...`);
-                            exec(`taskkill /PID ${pid} /F`, () => {
-                                resolve();
-                            });
-                            return;
-                        }
-                    }
-                }
+function validatePort(port, label) {
+    if (!Number.isInteger(port) || port < 1 || port > 65535) {
+        return `${label}必须是 1-65535 之间的整数`;
+    }
+    return null;
+}
+
+function validatePortSelection(apiPort, playerPort) {
+    const apiError = validatePort(apiPort, 'API端口');
+    if (apiError) return apiError;
+
+    const playerError = validatePort(playerPort, '播放器端口');
+    if (playerError) return playerError;
+
+    if (apiPort === playerPort) {
+        return 'API端口和播放器端口不能相同';
+    }
+
+    if (apiPort === LAUNCHER_PORT || playerPort === LAUNCHER_PORT) {
+        return `端口不能与启动器端口 ${LAUNCHER_PORT} 冲突`;
+    }
+
+    return null;
+}
+
+function isPortInUse(port) {
+    return new Promise((resolve, reject) => {
+        const tester = net.createServer();
+
+        tester.once('error', (error) => {
+            if (error.code === 'EADDRINUSE') {
+                resolve(true);
+                return;
             }
-            resolve();
+            reject(error);
         });
+
+        tester.once('listening', () => {
+            tester.close(() => resolve(false));
+        });
+
+        tester.listen(port, '127.0.0.1');
     });
 }
 
@@ -136,16 +157,15 @@ async function checkEnvironment() {
 
 // 启动API服务
 async function startApiServer(port) {
-    await killPort(port);
     console.log(`正在启动网易云API服务 (端口: ${port})...`);
 
     const env = { ...process.env, PORT: port.toString() };
 
-    apiProcess = spawn('node', ['app.js'], {
+    apiProcess = spawn(process.execPath, ['app.js'], {
         cwd: API_DIR,
         env: env,
         stdio: 'pipe',
-        shell: true
+        shell: false
     });
 
     apiProcess.stdout.on('data', (data) => {
@@ -167,13 +187,66 @@ async function startApiServer(port) {
     return apiProcess;
 }
 
+function stopApiServer() {
+    if (!apiProcess) {
+        return Promise.resolve();
+    }
+
+    const processToStop = apiProcess;
+    apiProcess = null;
+
+    return new Promise((resolve) => {
+        let finished = false;
+
+        const finish = () => {
+            if (finished) {
+                return;
+            }
+            finished = true;
+            resolve();
+        };
+
+        processToStop.once('close', () => {
+            finish();
+        });
+
+        try {
+            processToStop.kill();
+        } catch (error) {
+            console.warn('停止API服务失败:', error.message);
+            finish();
+            return;
+        }
+
+        setTimeout(() => {
+            if (finished) {
+                return;
+            }
+
+            console.warn(`API服务退出超时，尝试结束 PID ${processToStop.pid}`);
+            try {
+                process.kill(processToStop.pid, 'SIGKILL');
+            } catch (error) {
+                console.warn('强制结束API服务失败:', error.message);
+            }
+            finish();
+        }, 3000);
+    });
+}
+
 // 简单的静态文件服务器
 function startPlayerServer(port) {
     return new Promise(async (resolve) => {
-        await killPort(port);
         console.log(`正在启动音乐播放器服务 (端口: ${port})...`);
 
         const server = http.createServer((req, res) => {
+            if (req.url === '/launcher-config') {
+                const config = loadConfig();
+                res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+                res.end(JSON.stringify(config));
+                return;
+            }
+
             let filePath = path.join(PLAYER_DIR, req.url === '/' ? 'index.html' : req.url);
 
             // 安全检查：防止路径遍历
@@ -226,6 +299,25 @@ function startPlayerServer(port) {
             console.log(`音乐播放器已启动: http://localhost:${port}`);
             playerServer = server;
             resolve(server);
+        });
+    });
+}
+
+function stopPlayerServer() {
+    if (!playerServer) {
+        return Promise.resolve();
+    }
+
+    const serverToStop = playerServer;
+    playerServer = null;
+
+    return new Promise((resolve, reject) => {
+        serverToStop.close((error) => {
+            if (error) {
+                reject(error);
+                return;
+            }
+            resolve();
         });
     });
 }
@@ -448,6 +540,9 @@ function createStatusServer(apiPort, playerPort) {
             try {
                 const res = await fetch('/restart?apiPort=' + apiPort + '&playerPort=' + playerPort);
                 const data = await res.json();
+                if (!res.ok || !data.success) {
+                    throw new Error(data.message || '配置校验失败');
+                }
                 msg.className = 'msg success';
                 msg.style.display = 'block';
                 msg.textContent = '正在重启...';
@@ -464,8 +559,27 @@ function createStatusServer(apiPort, playerPort) {
             `);
         } else if (req.url.startsWith('/restart')) {
             const url = new URL(req.url, `http://localhost:${LAUNCHER_PORT}`);
-            const newApiPort = parseInt(url.searchParams.get('apiPort')) || 3000;
-            const newPlayerPort = parseInt(url.searchParams.get('playerPort')) || 5500;
+            const newApiPort = Number(url.searchParams.get('apiPort'));
+            const newPlayerPort = Number(url.searchParams.get('playerPort'));
+
+            const validationError = validatePortSelection(newApiPort, newPlayerPort);
+            if (validationError) {
+                res.writeHead(400, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ success: false, message: validationError }));
+                return;
+            }
+
+            if (newApiPort !== currentApiPort && await isPortInUse(newApiPort)) {
+                res.writeHead(409, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ success: false, message: `API端口 ${newApiPort} 已被占用` }));
+                return;
+            }
+
+            if (newPlayerPort !== currentPlayerPort && await isPortInUse(newPlayerPort)) {
+                res.writeHead(409, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ success: false, message: `播放器端口 ${newPlayerPort} 已被占用` }));
+                return;
+            }
 
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ success: true, apiPort: newApiPort, playerPort: newPlayerPort }));
@@ -475,17 +589,18 @@ function createStatusServer(apiPort, playerPort) {
             // 保存配置
             saveConfig({ apiPort: newApiPort, playerPort: newPlayerPort });
 
-            // 杀掉旧进程
-            if (apiProcess) apiProcess.kill();
-            if (playerServer) playerServer.close();
-
-            // 等待一下再启动新的
             setTimeout(async () => {
-                await startApiServer(newApiPort);
-                await startPlayerServer(newPlayerPort);
-                currentApiPort = newApiPort;
-                currentPlayerPort = newPlayerPort;
-            }, 1000);
+                try {
+                    await stopApiServer();
+                    await stopPlayerServer();
+                    await startApiServer(newApiPort);
+                    await startPlayerServer(newPlayerPort);
+                    currentApiPort = newApiPort;
+                    currentPlayerPort = newPlayerPort;
+                } catch (error) {
+                    console.error('重启服务失败:', error.message);
+                }
+            }, 200);
         } else if (req.url === '/status') {
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ running: true, apiPort: currentApiPort, playerPort: currentPlayerPort }));
@@ -509,6 +624,21 @@ async function main() {
     const config = loadConfig();
     currentApiPort = config.apiPort;
     currentPlayerPort = config.playerPort;
+
+    const validationError = validatePortSelection(currentApiPort, currentPlayerPort);
+    if (validationError) {
+        throw new Error(`启动器配置无效: ${validationError}`);
+    }
+
+    if (await isPortInUse(LAUNCHER_PORT)) {
+        throw new Error(`启动器端口 ${LAUNCHER_PORT} 已被占用`);
+    }
+    if (await isPortInUse(currentApiPort)) {
+        throw new Error(`API端口 ${currentApiPort} 已被占用，请修改配置后重试`);
+    }
+    if (await isPortInUse(currentPlayerPort)) {
+        throw new Error(`播放器端口 ${currentPlayerPort} 已被占用，请修改配置后重试`);
+    }
 
     console.log('========================================');
     console.log('   网易云音乐启动器');
@@ -537,10 +667,13 @@ async function main() {
     // 优雅退出
     process.on('SIGINT', () => {
         console.log('\n正在关闭...');
-        if (apiProcess) apiProcess.kill();
-        if (playerServer) playerServer.close();
-        statusServer.close();
-        process.exit(0);
+        Promise.allSettled([
+            stopApiServer(),
+            stopPlayerServer(),
+            new Promise((resolve) => statusServer.close(resolve))
+        ]).finally(() => {
+            process.exit(0);
+        });
     });
 }
 

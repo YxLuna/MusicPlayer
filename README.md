@@ -64,11 +64,11 @@ cd 音乐播放器/启动器
 启动器会自动：
 - 检测 Node.js 环境
 - 启动 API 服务（默认 3000 端口）
-- 启动播放器服务（默认 3002 端口）
+- 启动播放器服务（默认 5500 端口）
 - 打开控制面板 http://localhost:3001
 
 启动后访问：
-- **播放器**: http://localhost:3002
+- **播放器**: http://localhost:5500
 - **API 服务**: http://localhost:3000
 - **启动器面板**: http://localhost:3001
 
@@ -77,7 +77,7 @@ cd 音乐播放器/启动器
 #### 1. 启动 API 服务
 
 ```bash
-# 进入 api-enhanced-main 目录（需要自行克隆）
+# 进入项目内置的 api-enhanced-main 目录
 cd api-enhanced-main
 npm install
 node app.js
@@ -90,7 +90,7 @@ API 服务地址：http://localhost:3000
 使用 Python：
 ```bash
 cd 音乐播放器
-python -m http.server 3002
+python -m http.server 5500
 ```
 
 或使用 VSCode Live Server 扩展打开 index.html。

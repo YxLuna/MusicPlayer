@@ -40,7 +40,7 @@ class MusicApp {
             this.user = savedUser;
             this.ui.updateUserInfo(this.user);
             // 尝试获取最新用户信息（可能需要刷新）
-            this.loadUserInfo().catch(() => {});
+            this.loadUserInfo({ silent: true, clearOnFailure: true }).catch(() => {});
         }
 
         // 绑定事件回调
@@ -727,7 +727,9 @@ class MusicApp {
     }
 
     // 加载用户信息
-    async loadUserInfo() {
+    async loadUserInfo(options = {}) {
+        const { silent = false, clearOnFailure = false } = options;
+
         try {
             const account = await API.getUserAccount();
             if (account.account && account.account.id) {
@@ -748,10 +750,23 @@ class MusicApp {
                 this.ui.renderPlaylists(this.playlistManager.playlists, this.playlistManager.currentPlaylist?.id);
                 await this.tryRestorePlaybackSession();
 
-                this.ui.showToast('欢迎, ' + this.user.nickname, 'success');
+                if (!silent) {
+                    this.ui.showToast('欢迎, ' + this.user.nickname, 'success');
+                }
             }
+
+            return this.user;
         } catch (error) {
             console.error('加载用户信息失败:', error);
+
+            if (clearOnFailure) {
+                this.isLoggedIn = false;
+                this.user = null;
+                API.clearCookie();
+                this.ui.updateUserInfo(null);
+            }
+
+            throw error;
         }
     }
 
