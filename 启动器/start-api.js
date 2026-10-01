@@ -11,10 +11,12 @@ const http = require('http');
 const net = require('net');
 const { exec } = require('child_process');
 
-// 获取启动器所在目录（即项目根目录）
-const PROJECT_ROOT = path.join(__dirname, '..', '..');
-const API_DIR = path.join(PROJECT_ROOT, 'api-enhanced-main');
-const PLAYER_DIR = path.join(__dirname, '..'); // 播放器在启动器的上一级目录
+// 播放器在启动器的上一级目录（即仓库根目录）
+const PLAYER_DIR = path.join(__dirname, '..');
+// API 默认放在与本仓库同级的 api-enhanced-main 目录，可用环境变量 API_DIR 覆盖
+const API_DIR = process.env.API_DIR
+    ? path.resolve(process.env.API_DIR)
+    : path.join(PLAYER_DIR, '..', 'api-enhanced-main');
 const CONFIG_FILE = path.join(__dirname, 'config.json');
 const LAUNCHER_PORT = 3001;
 
@@ -108,6 +110,9 @@ async function checkEnvironment() {
     console.log('[2/3] 检测 API 目录...');
     if (!fs.existsSync(API_DIR)) {
         console.error(`❌ API 目录不存在: ${API_DIR}`);
+        console.error('   请把 api-enhanced 克隆到与本仓库同级的 api-enhanced-main 目录：');
+        console.error('   git clone https://github.com/neteasecloudmusicapienhanced/api-enhanced ../api-enhanced-main');
+        console.error('   或通过环境变量 API_DIR 指定 API 目录');
         process.exit(1);
     }
     console.log(`   ✓ API 目录存在`);
@@ -609,11 +614,23 @@ function createStatusServer(apiPort, playerPort) {
 
     server.listen(LAUNCHER_PORT, () => {
         console.log(`启动器页面: http://localhost:${LAUNCHER_PORT}`);
-        // 自动打开浏览器 (Windows)
-        exec(`start http://localhost:${LAUNCHER_PORT}`);
+        openBrowser(`http://localhost:${LAUNCHER_PORT}`);
     });
 
     return server;
+}
+
+// 自动打开浏览器（Windows / macOS / Linux）
+function openBrowser(url) {
+    if (process.env.NO_BROWSER) return;
+    const command = process.platform === 'win32'
+        ? `start "" "${url}"`
+        : process.platform === 'darwin'
+            ? `open "${url}"`
+            : `xdg-open "${url}"`;
+    exec(command, (error) => {
+        if (error) console.log(`无法自动打开浏览器，请手动访问 ${url}`);
+    });
 }
 
 // 主函数
@@ -665,7 +682,7 @@ async function main() {
     const statusServer = createStatusServer(currentApiPort, currentPlayerPort);
 
     // 优雅退出
-    process.on('SIGINT', () => {
+    const shutdown = () => {
         console.log('\n正在关闭...');
         Promise.allSettled([
             stopApiServer(),
@@ -674,7 +691,9 @@ async function main() {
         ]).finally(() => {
             process.exit(0);
         });
-    });
+    };
+    process.on('SIGINT', shutdown);
+    process.on('SIGTERM', shutdown);
 }
 
 main().catch(console.error);

@@ -1,0 +1,13 @@
+{
+  "name": "cloudmusic-pro-player",
+  "version": "1.0.0",
+  "private": true,
+  "description": "梦幻樱花主题的网易云音乐增强版播放器",
+  "license": "MIT",
+  "scripts": {
+    "start": "node 启动器/start-api.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

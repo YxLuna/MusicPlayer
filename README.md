@@ -8,6 +8,16 @@
 
 ---
 
+## 📸 截图
+
+![播放器主界面](docs/screenshots/player.png)
+
+| 搜索 | 启动器面板 |
+|------|-----------|
+| ![搜索](docs/screenshots/search.png) | ![启动器](docs/screenshots/launcher.png) |
+
+---
+
 ## ✨ 功能特性
 
 ### 🎧 核心播放
@@ -51,18 +61,41 @@
 
 ## 🚀 快速开始
 
-### 方式一：一键启动器（推荐）
+### 0. 准备
+
+- [Node.js](https://nodejs.org/) 18+
+- 网易云音乐增强版 API：克隆到**与本仓库同级**的 `api-enhanced-main` 目录
 
 ```bash
-# 1. 进入启动器目录
-cd 音乐播放器/启动器
+git clone https://github.com/YxLuna/MusicPlayer.git
+git clone https://github.com/neteasecloudmusicapienhanced/api-enhanced.git api-enhanced-main
+```
 
-# 2. 运行启动器
-启动API.bat
+目录结构应为：
+
+```
+任意目录/
+├── MusicPlayer/          # 本仓库
+└── api-enhanced-main/    # 网易云 API
+```
+
+> API 放在别处也行，启动前设置环境变量 `API_DIR=/path/to/api` 即可。
+
+### 方式一：一键启动（推荐）
+
+```bash
+cd MusicPlayer
+
+# Windows：双击 启动器/启动API.bat
+# macOS / Linux：
+./start.sh
+# 或任意平台：
+npm start
 ```
 
 启动器会自动：
 - 检测 Node.js 环境
+- 首次运行时自动为 API 安装依赖
 - 启动 API 服务（默认 3000 端口）
 - 启动播放器服务（默认 5500 端口）
 - 打开控制面板 http://localhost:3001
@@ -72,12 +105,13 @@ cd 音乐播放器/启动器
 - **API 服务**: http://localhost:3000
 - **启动器面板**: http://localhost:3001
 
+> 不想自动打开浏览器可以设置 `NO_BROWSER=1`。
+
 ### 方式二：手动启动
 
 #### 1. 启动 API 服务
 
 ```bash
-# 进入项目内置的 api-enhanced-main 目录
 cd api-enhanced-main
 npm install
 node app.js
@@ -87,9 +121,8 @@ API 服务地址：http://localhost:3000
 
 #### 2. 启动播放器
 
-使用 Python：
 ```bash
-cd 音乐播放器
+cd MusicPlayer
 python -m http.server 5500
 ```
 
@@ -100,25 +133,32 @@ python -m http.server 5500
 ## 📁 项目结构
 
 ```
-音乐播放器/
+MusicPlayer/
 ├── index.html              # 主页面
 ├── css/
-│   └── style.css          # 樱花主题样式
+│   └── style.css           # 樱花主题样式
 ├── js/
 │   ├── app.js              # 主应用入口
 │   ├── api.js              # API 封装
 │   ├── player.js           # 播放器核心
-│   ├── playlist.js          # 歌单管理
+│   ├── playlist.js         # 歌单管理
 │   ├── lyric.js            # 歌词解析
 │   ├── visualizer.js       # 音频可视化
 │   └── ui.js               # UI 交互
 ├── 启动器/
-│   ├── 启动API.bat         # 一键启动脚本
+│   ├── 启动API.bat         # Windows 一键启动
 │   ├── start-api.js        # 启动器服务
-│   └── config.json         # 端口配置
+│   └── config.json         # 端口配置（运行后生成，不入库）
+├── docs/
+│   ├── screenshots/        # README 截图
+│   ├── 开发进度总结.md
+│   ├── 项目进度.md
+│   └── 网易云api接口.md    # 常用 API 接口速查
+├── start.sh                # macOS / Linux 一键启动
+├── package.json            # npm start
 ├── SPEC.md                 # 项目规范
-├── README.md               # 使用说明
-└── .gitignore             # Git 忽略配置
+├── LICENSE
+└── README.md
 ```
 
 ---
@@ -152,7 +192,7 @@ python -m http.server 5500
 ```json
 {
   "apiPort": 3000,
-  "playerPort": 3002
+  "playerPort": 5500
 }
 ```
 
@@ -187,7 +227,7 @@ const API_BASE = 'http://localhost:3000';
 
 ## 📄 许可证
 
-MIT License - 仅供学习交流使用，请尊重版权。
+[MIT](LICENSE) - 仅供学习交流使用，请尊重版权。
 
 ---
 
