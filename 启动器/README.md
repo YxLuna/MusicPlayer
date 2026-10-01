@@ -7,7 +7,7 @@
 ### 方式一：直接运行
 在终端中运行以下命令：
 ```bash
-cd 音乐播放器/启动器
+cd MusicPlayer/启动器
 node start-api.js
 ```
 
@@ -15,7 +15,7 @@ node start-api.js
 1. 创建一个批处理文件 `启动API.bat`：
 ```batch
 @echo off
-cd /d "你的项目路径\音乐播放器\启动器"
+cd /d "你的项目路径\MusicPlayer\启动器"
 node start-api.js
 pause
 ```
